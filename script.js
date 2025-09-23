@@ -638,9 +638,11 @@ function editReceipt() {
     document.getElementById('item-name').focus();
 }
 
-// NEW: Function to automatically sync data with localStorage
 function syncWithSharedData() {
-    if (!isHost) return; // Only for host
+    if (!isHost) return;
+    
+    // This function is now only called from renderSummary() and refreshSummary()
+    // The main sync logic is in showSummary() above
     
     const shareUrl = document.getElementById('share-url').value;
     if (shareUrl) {
@@ -651,7 +653,6 @@ function syncWithSharedData() {
             const savedData = localStorage.getItem(`receipt_${receiptId}`);
             if (savedData) {
                 const sharedReceiptData = JSON.parse(savedData);
-                // Only update items and payments, keep current form values
                 receiptData.items = sharedReceiptData.items;
                 receiptData.payments = sharedReceiptData.payments || {};
             }
