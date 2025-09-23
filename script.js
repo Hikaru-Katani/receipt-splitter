@@ -5,7 +5,7 @@ let receiptData = {
     tax: 0,
     tip: 0,
     people: {},
-    payments: {} // Track payments
+    payments: {}
 };
 
 let currentGuest = '';
@@ -15,7 +15,7 @@ let isHost = true;
 document.addEventListener('DOMContentLoaded', function() {
     checkUrlParams();
     renderItems(); // Show empty state initially
-    setTimeout(loadDraft, 100); // Load draft after initialization
+    setTimeout(loadDraft, 100); // Load draft after other init functions
 });
 
 function checkUrlParams() {
@@ -109,7 +109,7 @@ function generateShareLink() {
     receiptData.tax = tax;
     receiptData.tip = tip;
     
-    // Save to localStorage
+    // Save to localStorage (in a real app, this would be sent to a server)
     const receiptId = Date.now().toString();
     localStorage.setItem(`receipt_${receiptId}`, JSON.stringify(receiptData));
     
@@ -143,10 +143,6 @@ function loadSharedReceipt(receiptId) {
     const savedData = localStorage.getItem(`receipt_${receiptId}`);
     if (savedData) {
         receiptData = JSON.parse(savedData);
-        // Ensure payments object exists
-        if (!receiptData.payments) {
-            receiptData.payments = {};
-        }
         document.getElementById('receipt-title').textContent = receiptData.name;
         renderGuestItems();
     } else {
@@ -251,7 +247,6 @@ function updateGuestTotal() {
     const myTip = receiptData.tip * myProportion;
     const total = subtotal + myTax + myTip;
     
-    // Simple total display without payment confirmation button
     const totalContainer = document.getElementById('guest-total');
     totalContainer.innerHTML = `
         <h3>Your Total</h3>
@@ -259,11 +254,6 @@ function updateGuestTotal() {
         <p><strong>Tax (your share):</strong> $${myTax.toFixed(2)}</p>
         <p><strong>Tip (your share):</strong> $${myTip.toFixed(2)}</p>
         <div class="total-amount">You Owe: $${total.toFixed(2)}</div>
-        <div style="margin-top: 15px; padding: 15px; background: #f7fafc; border-radius: 8px; border: 1px solid #e2e8f0; text-align: center;">
-            <p style="color: #4a5568; font-size: 0.95rem;">
-                💡 Please pay <strong>$${total.toFixed(2)}</strong> to the host
-            </p>
-        </div>
     `;
 }
 
@@ -304,7 +294,7 @@ function renderSummary() {
     
     let summaryHtml = `
         <div class="summary-card">
-            <div class="summary-name">📋 ${receiptData.name}</div>
+            <div class="summary-name">Receipt: ${receiptData.name}</div>
             <div class="summary-items">
                 <strong>Items Total:</strong> $${totalItemsValue.toFixed(2)} | 
                 <strong>Tax:</strong> $${receiptData.tax.toFixed(2)} | 
@@ -318,7 +308,7 @@ function renderSummary() {
     let totalPaid = 0;
     let totalOwed = 0;
     
-    // Show each person's breakdown with payment tracking
+    // Show each person's breakdown with payment status
     Object.keys(people).forEach(person => {
         const personData = people[person];
         const myProportion = totalItemsValue > 0 ? personData.subtotal / totalItemsValue : 0;
@@ -367,7 +357,7 @@ function renderSummary() {
     const remainingBalance = totalOwed - totalPaid;
     summaryHtml += `
         <div class="summary-card payment-summary">
-            <div class="summary-name">💰 Payment Summary</div>
+            <div class="summary-name">Payment Summary</div>
             <div class="payment-totals">
                 <div class="total-row">
                     <span>Total Owed:</span>
@@ -385,7 +375,7 @@ function renderSummary() {
                 </div>
             </div>
             ${remainingBalance <= 0.01 ? 
-                '<div class="all-paid">🎉 All payments received!</div>' : 
+                '<div class="all-paid">All payments received!</div>' : 
                 `<div class="pending-payment">Still waiting for $${remainingBalance.toFixed(2)}</div>`
             }
         </div>
@@ -400,7 +390,7 @@ function renderSummary() {
         const unclaimedTotal = unclaimedItems.reduce((sum, item) => sum + item.price, 0);
         summaryHtml += `
             <div class="summary-card unclaimed-items">
-                <div class="summary-name">⚠️ Unclaimed Items</div>
+                <div class="summary-name">Unclaimed Items</div>
                 <div class="summary-items">
                     <strong>Items:</strong> ${unclaimedItems.map(item => `${item.name} ($${item.price.toFixed(2)})`).join(', ')}<br>
                     <strong>Total Value:</strong> $${unclaimedTotal.toFixed(2)}
@@ -415,7 +405,6 @@ function renderSummary() {
     summaryContainer.innerHTML = summaryHtml;
 }
 
-// Update payment amounts
 function updatePayment(person, amount) {
     const paymentAmount = parseFloat(amount) || 0;
     receiptData.payments[person] = paymentAmount;
@@ -444,10 +433,6 @@ function refreshSummary() {
         const savedData = localStorage.getItem(`receipt_${receiptId}`);
         if (savedData) {
             receiptData = JSON.parse(savedData);
-            // Ensure payments object exists
-            if (!receiptData.payments) {
-                receiptData.payments = {};
-            }
         }
     }
     
@@ -456,7 +441,7 @@ function refreshSummary() {
     // Show feedback
     const button = event.target;
     const originalText = button.textContent;
-    button.textContent = '✓ Updated';
+    button.textContent = 'Updated';
     
     setTimeout(() => {
         button.textContent = originalText;
@@ -509,11 +494,6 @@ function loadDraft() {
         const draftData = localStorage.getItem('receipt_draft');
         if (draftData) {
             receiptData = JSON.parse(draftData);
-            
-            // Ensure payments object exists
-            if (!receiptData.payments) {
-                receiptData.payments = {};
-            }
             
             // Populate form fields
             if (receiptData.name) document.getElementById('receipt-name').value = receiptData.name;
