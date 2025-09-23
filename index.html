@@ -93,6 +93,18 @@
         </div>
     </div>
 
+    <!-- Receipt Dashboard -->
+<div id="receipt-dashboard" class="section" style="display: block;">
+    <h2>My Receipts</h2>
+    <div class="dashboard-actions">
+        <button onclick="createNewReceipt()" class="primary-btn">+ Create New Receipt</button>
+        <button onclick="refreshReceiptList()" class="secondary-btn">Refresh List</button>
+    </div>
+    
+    <div id="receipts-list" class="receipts-container">
+        <div class="empty-state">No receipts yet. Create your first receipt to get started!</div>
+    </div>
+</div>
     <script src="script.js"></script>
 </body>
 </html>
