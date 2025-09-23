@@ -310,6 +310,63 @@ function showSummary() {
     receiptData.tax = parseFloat(document.getElementById('tax-amount').value) || 0;
     receiptData.tip = parseFloat(document.getElementById('tip-amount').value) || 0;
     
+    // Check if we need to sync with shared data
+    // Look for any existing receipt in localStorage that matches our current receipt
+    if (isHost) {
+        // Try to find existing shared receipt data
+        let foundReceiptId = null;
+        
+        // First check if share URL exists
+        const shareUrl = document.getElementById('share-url').value;
+        if (shareUrl) {
+            const urlParams = new URLSearchParams(shareUrl.split('?')[1]);
+            foundReceiptId = urlParams.get('receipt');
+        }
+        
+        // If no share URL, check localStorage for any receipt with matching items
+        if (!foundReceiptId) {
+            for (let i = 0; i < localStorage.length; i++) {
+                const key = localStorage.key(i);
+                if (key && key.startsWith('receipt_')) {
+                    const receiptId = key.replace('receipt_', '');
+                    const savedData = localStorage.getItem(key);
+                    if (savedData) {
+                        const savedReceiptData = JSON.parse(savedData);
+                        // Check if this saved receipt has the same items as our current receipt
+                        if (savedReceiptData.name === receiptData.name && 
+                            savedReceiptData.items.length === receiptData.items.length) {
+                            foundReceiptId = receiptId;
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+        
+        // If we found a matching receipt, sync the data
+        if (foundReceiptId) {
+            const savedData = localStorage.getItem(`receipt_${foundReceiptId}`);
+            if (savedData) {
+                const sharedReceiptData = JSON.parse(savedData);
+                console.log('Syncing with shared receipt data:', sharedReceiptData);
+                
+                // Merge the guest selections with current host data
+                // Keep the current form values but update claims and payments
+                receiptData.items = sharedReceiptData.items.map(savedItem => {
+                    const currentItem = receiptData.items.find(item => item.name === savedItem.name && item.price === savedItem.price);
+                    if (currentItem) {
+                        return {
+                            ...currentItem,
+                            claimedBy: savedItem.claimedBy || []
+                        };
+                    }
+                    return savedItem;
+                });
+                receiptData.payments = sharedReceiptData.payments || {};
+            }
+        }
+    }
+    
     document.getElementById('host-section').style.display = 'none';
     document.getElementById('summary-section').style.display = 'block';
     
