@@ -604,3 +604,54 @@ header p {
         font-size: 1rem;
     }
 }
+
+.payment-controls {
+    display: flex;
+    align-items: center;
+    gap: 15px;
+    flex-wrap: wrap;
+}
+
+.mark-paid-btn {
+    background: #38a169;
+    color: white;
+    border: none;
+    padding: 8px 15px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 0.9rem;
+    font-weight: 600;
+    transition: all 0.3s ease;
+    white-space: nowrap;
+}
+
+.mark-paid-btn:hover {
+    background: #2f855a;
+    transform: translateY(-1px);
+}
+
+.quick-paid-btn {
+    background: #48bb78;
+    color: white;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    font-weight: 600;
+    transition: all 0.3s ease;
+}
+
+.quick-paid-btn:hover {
+    background: #38a169;
+}
+
+@media (max-width: 768px) {
+    .payment-controls {
+        flex-direction: column;
+        align-items: stretch;
+        gap: 10px;
+    }
+    
+    .mark-paid-btn {
+        width: 100%;
+    }
+}
