@@ -319,6 +319,7 @@ function showSummary() {
 function renderSummary() {
     // Sync with shared data before rendering
     syncWithSharedData();
+    
     const summaryContainer = document.getElementById('summary-content');
     const people = {};
     
@@ -348,16 +349,10 @@ function renderSummary() {
         </div>
     `;
     
-    // FIXED: Better detection of people with claims
     const peopleWithClaims = Object.keys(people);
     const hasPeopleClaims = peopleWithClaims.length > 0;
     
-    // Debug info (remove this in production)
-    console.log('People with claims:', peopleWithClaims);
-    console.log('Has people claims:', hasPeopleClaims);
-    
     if (hasPeopleClaims) {
-        // Payment tracking summary
         let totalPaid = 0;
         let totalOwed = 0;
         const owingDetails = [];
@@ -375,7 +370,6 @@ function renderSummary() {
             totalOwed += total;
             totalPaid += paid;
             
-            // Track who owes what for the summary
             if (balance > 0.01) {
                 owingDetails.push({ person, amount: balance });
             }
@@ -398,11 +392,19 @@ function renderSummary() {
                     </div>
                     <div class="payment-tracking">
                         <div class="amount-owed">Total Bill: $${total.toFixed(2)}</div>
-                        <div class="payment-input">
-                            <label>Amount Paid:</label>
-                            <input type="number" step="0.01" value="${paid.toFixed(2)}" 
-                                   onchange="updatePayment('${person}', this.value)"
-                                   class="payment-amount">
+                        <div class="payment-controls">
+                            <div class="payment-input">
+                                <label>Amount Paid:</label>
+                                <input type="number" step="0.01" value="${paid.toFixed(2)}" 
+                                       onchange="updatePayment('${person}', this.value)"
+                                       class="payment-amount">
+                            </div>
+                            ${balance > 0.01 ? `
+                                <button onclick="markAsPaid('${person}', ${total.toFixed(2)})" 
+                                        class="mark-paid-btn">
+                                    ✓ Mark as Paid
+                                </button>
+                            ` : ''}
                         </div>
                         <div class="balance" style="color: ${statusColor}; font-weight: bold;">
                             ${balance <= 0.01 ? 'Fully Paid' : `Still Owes: $${balance.toFixed(2)}`}
@@ -412,7 +414,7 @@ function renderSummary() {
             `;
         });
         
-        // Overall payment summary with "Who Owes How Much"
+        // Rest of the summary continues as before...
         const remainingBalance = totalOwed - totalPaid;
         summaryHtml += `
             <div class="summary-card payment-summary">
@@ -435,7 +437,6 @@ function renderSummary() {
                 </div>
         `;
         
-        // Add "Who Owes How Much" section
         if (owingDetails.length > 0) {
             summaryHtml += `
                 <div class="who-owes-section">
@@ -447,7 +448,13 @@ function renderSummary() {
                 summaryHtml += `
                     <li style="padding: 8px 0; border-bottom: 1px solid #e2e8f0; display: flex; justify-content: space-between; align-items: center;">
                         <span style="font-weight: 600; color: #2d3748;">${person}</span>
-                        <span style="color: #e53e3e; font-weight: 700; font-size: 1.1rem;">$${amount.toFixed(2)}</span>
+                        <div style="display: flex; align-items: center; gap: 10px;">
+                            <span style="color: #e53e3e; font-weight: 700; font-size: 1.1rem;">$${amount.toFixed(2)}</span>
+                            <button onclick="markAsPaid('${person}', ${(receiptData.items.filter(item => item.claimedBy.includes(person)).reduce((sum, item) => sum + item.price, 0) + (receiptData.tax + receiptData.tip) * (receiptData.items.filter(item => item.claimedBy.includes(person)).reduce((sum, item) => sum + item.price, 0) / totalItemsValue)).toFixed(2)})" 
+                                    class="quick-paid-btn" style="font-size: 0.8rem; padding: 4px 8px;">
+                                ✓ Paid
+                            </button>
+                        </div>
                     </li>
                 `;
             });
@@ -472,7 +479,6 @@ function renderSummary() {
             </div>
         `;
     } else {
-        // No one has claimed items yet
         summaryHtml += `
             <div class="summary-card">
                 <div class="summary-name">⏳ Waiting for People to Claim Items</div>
@@ -483,7 +489,7 @@ function renderSummary() {
         `;
     }
     
-    // Show unclaimed items
+    // Unclaimed items section stays the same...
     const unclaimedItems = receiptData.items.filter(item => 
         item.claimedBy.length === 0
     );
@@ -650,6 +656,40 @@ function syncWithSharedData() {
                 receiptData.payments = sharedReceiptData.payments || {};
             }
         }
+    }
+}
+
+// NEW: Function to mark someone as fully paid
+function markAsPaid(person, totalAmount) {
+    if (confirm(`Mark ${person} as fully paid ($${totalAmount})?`)) {
+        receiptData.payments[person] = parseFloat(totalAmount);
+        
+        // Save to localStorage
+        const shareUrl = document.getElementById('share-url').value;
+        if (shareUrl) {
+            const urlParams = new URLSearchParams(shareUrl.split('?')[1]);
+            const receiptId = urlParams.get('receipt');
+            if (receiptId) {
+                localStorage.setItem(`receipt_${receiptId}`, JSON.stringify(receiptData));
+            }
+        }
+        
+        // Save draft too
+        localStorage.setItem('receipt_draft', JSON.stringify(receiptData));
+        
+        // Re-render summary
+        renderSummary();
+        
+        // Show success message briefly
+        const button = event.target;
+        const originalText = button.textContent;
+        button.textContent = '✓ Marked Paid';
+        button.style.background = '#38a169';
+        button.disabled = true;
+        
+        setTimeout(() => {
+            renderSummary(); // This will remove the button since they're now paid
+        }, 1500);
     }
 }
 
