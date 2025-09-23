@@ -655,3 +655,128 @@ header p {
         width: 100%;
     }
 }
+
+.receipts-container {
+    margin-top: 25px;
+}
+
+.receipt-card {
+    background: white;
+    border: 2px solid #e2e8f0;
+    border-radius: 12px;
+    padding: 20px;
+    margin-bottom: 15px;
+    transition: all 0.3s ease;
+    cursor: pointer;
+}
+
+.receipt-card:hover {
+    border-color: #667eea;
+    box-shadow: 0 4px 15px rgba(102, 126, 234, 0.1);
+    transform: translateY(-2px);
+}
+
+.receipt-card-header {
+    display: flex;
+    justify-content: between;
+    align-items: center;
+    margin-bottom: 10px;
+}
+
+.receipt-card-title {
+    font-size: 1.2rem;
+    font-weight: 700;
+    color: #2d3748;
+}
+
+.receipt-card-date {
+    font-size: 0.9rem;
+    color: #718096;
+}
+
+.receipt-card-summary {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+    gap: 15px;
+    margin-top: 15px;
+}
+
+.receipt-stat {
+    text-align: center;
+}
+
+.receipt-stat-value {
+    font-size: 1.1rem;
+    font-weight: 700;
+    color: #667eea;
+}
+
+.receipt-stat-label {
+    font-size: 0.8rem;
+    color: #718096;
+    margin-top: 2px;
+}
+
+.receipt-actions {
+    display: flex;
+    gap: 10px;
+    margin-top: 15px;
+    justify-content: flex-end;
+}
+
+.receipt-actions button {
+    padding: 6px 12px;
+    border: none;
+    border-radius: 6px;
+    font-size: 0.85rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.3s ease;
+}
+
+.edit-receipt-btn {
+    background: #667eea;
+    color: white;
+}
+
+.edit-receipt-btn:hover {
+    background: #5a67d8;
+}
+
+.delete-receipt-btn {
+    background: #e53e3e;
+    color: white;
+}
+
+.delete-receipt-btn:hover {
+    background: #c53030;
+}
+
+.view-summary-btn {
+    background: #38a169;
+    color: white;
+}
+
+.view-summary-btn:hover {
+    background: #2f855a;
+}
+
+.dashboard-actions {
+    display: flex;
+    gap: 15px;
+    margin-bottom: 20px;
+}
+
+@media (max-width: 768px) {
+    .receipt-card-summary {
+        grid-template-columns: 1fr 1fr;
+    }
+    
+    .receipt-actions {
+        flex-direction: column;
+    }
+    
+    .dashboard-actions {
+        flex-direction: column;
+    }
+}
