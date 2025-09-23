@@ -23,20 +23,6 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 });
 
-function checkUrlParams() {
-    const urlParams = new URLSearchParams(window.location.search);
-    const receiptId = urlParams.get('receipt');
-    
-    if (receiptId) {
-        // Guest mode
-        isHost = false;
-        loadSharedReceipt(receiptId);
-        showGuestSection();
-    } else {
-        // Host mode - show dashboard
-        showDashboard();
-    }
-}
 
 function showDashboard() {
     document.getElementById('receipt-dashboard').style.display = 'block';
@@ -337,19 +323,147 @@ function generateShareLink() {
     receiptData.tax = tax;
     receiptData.tip = tip;
     
-    // Save the current receipt
-    if (!currentReceiptId) {
-        currentReceiptId = Date.now().toString();
+    try {
+        // Encode receipt data in URL (compress it)
+        const jsonString = JSON.stringify(receiptData);
+        const encodedData = btoa(unescape(encodeURIComponent(jsonString)));
+        const shareUrl = `${window.location.origin}${window.location.pathname}?data=${encodedData}`;
+        
+        // Also save locally for host
+        if (!currentReceiptId) {
+            currentReceiptId = Date.now().toString();
+        }
+        localStorage.setItem(`receipt_${currentReceiptId}`, JSON.stringify(receiptData));
+        receipts[currentReceiptId] = { ...receiptData };
+        
+        document.getElementById('share-url').value = shareUrl;
+        document.getElementById('share-link').style.display = 'block';
+        
+        console.log('Generated share URL:', shareUrl); // Debug log
+        document.getElementById('share-link').scrollIntoView({ behavior: 'smooth' });
+    } catch (error) {
+        console.error('Error generating share link:', error);
+        alert('Error generating share link. Please try again.');
+    }
+}
+
+function checkUrlParams() {
+    const urlParams = new URLSearchParams(window.location.search);
+    const encodedData = urlParams.get('data');
+    const receiptId = urlParams.get('receipt'); // Keep for backwards compatibility
+    
+    console.log('URL params:', { encodedData: !!encodedData, receiptId }); // Debug log
+    
+    if (encodedData) {
+        // Guest mode - load from URL data
+        try {
+            console.log('Decoding data from URL...'); // Debug log
+            const decodedString = decodeURIComponent(escape(atob(encodedData)));
+            const decodedData = JSON.parse(decodedString);
+            
+            receiptData = decodedData;
+            if (!receiptData.confirmedGuests) {
+                receiptData.confirmedGuests = {};
+            }
+            if (!receiptData.payments) {
+                receiptData.payments = {};
+            }
+            
+            isHost = false;
+            
+            // Create a temporary receipt ID for this session
+            currentReceiptId = 'shared_' + Date.now().toString();
+            localStorage.setItem(`receipt_${currentReceiptId}`, JSON.stringify(receiptData));
+            
+            console.log('Successfully loaded receipt:', receiptData.name); // Debug log
+            document.getElementById('receipt-title').textContent = receiptData.name;
+            showGuestSection();
+            
+            // Small delay to ensure DOM is ready
+            setTimeout(() => {
+                renderGuestItems();
+            }, 100);
+            
+        } catch (error) {
+            console.error('Error decoding receipt data:', error);
+            alert('Invalid receipt link. The link may be corrupted or expired.');
+            showDashboard();
+        }
+    } else if (receiptId) {
+        // Old method - try localStorage (backwards compatibility)
+        isHost = false;
+        loadSharedReceipt(receiptId);
+        showGuestSection();
+    } else {
+        // Host mode - show dashboard
+        isHost = true;
+        showDashboard();
+    }
+}
+
+// Update the toggleItemSelection function to save back to URL-based storage
+function toggleItemSelection(itemId) {
+    if (!currentGuest) {
+        alert('Please set your name first');
+        return;
     }
     
+    const item = receiptData.items.find(i => i.id === itemId);
+    if (!item) return;
+    
+    const index = item.claimedBy.indexOf(currentGuest);
+    if (index > -1) {
+        item.claimedBy.splice(index, 1);
+    } else {
+        item.claimedBy.push(currentGuest);
+    }
+    
+    // Reset confirmation status when items change
+    if (receiptData.confirmedGuests && receiptData.confirmedGuests[currentGuest]) {
+        delete receiptData.confirmedGuests[currentGuest];
+    }
+    
+    // Save to localStorage for this session
     localStorage.setItem(`receipt_${currentReceiptId}`, JSON.stringify(receiptData));
-    receipts[currentReceiptId] = { ...receiptData };
     
-    const shareUrl = `${window.location.origin}${window.location.pathname}?receipt=${currentReceiptId}`;
-    document.getElementById('share-url').value = shareUrl;
-    document.getElementById('share-link').style.display = 'block';
+    renderGuestItems();
+}
+
+// Update confirmSelectionWithHost to work with URL-based sharing
+function confirmSelectionWithHost() {
+    if (!currentGuest) {
+        alert('Please set your name first');
+        return;
+    }
     
-    document.getElementById('share-link').scrollIntoView({ behavior: 'smooth' });
+    const myItems = receiptData.items.filter(item => 
+        item.claimedBy.includes(currentGuest)
+    );
+    
+    if (myItems.length === 0) {
+        alert('Please select at least one item before confirming');
+        return;
+    }
+    
+    // Mark this guest as confirmed
+    if (!receiptData.confirmedGuests) {
+        receiptData.confirmedGuests = {};
+    }
+    
+    receiptData.confirmedGuests[currentGuest] = {
+        confirmedAt: new Date().toISOString(),
+        items: myItems.map(item => item.name),
+        total: myItems.reduce((sum, item) => sum + item.price, 0)
+    };
+    
+    // Save to localStorage for this session
+    localStorage.setItem(`receipt_${currentReceiptId}`, JSON.stringify(receiptData));
+    
+    // Update the display
+    updateGuestTotal();
+    
+    // Show success feedback with instructions
+    alert(`Your selection has been confirmed!\n\nIMPORTANT: Your selections are saved locally on this device. To sync with the host, you need to tell them to check their payment summary and refresh it to see your latest selections.`);
 }
 
 function copyLink() {
@@ -436,33 +550,6 @@ function renderGuestItems() {
     updateGuestTotal();
 }
 
-function toggleItemSelection(itemId) {
-    if (!currentGuest) {
-        alert('Please set your name first');
-        return;
-    }
-    
-    const item = receiptData.items.find(i => i.id === itemId);
-    if (!item) return;
-    
-    const index = item.claimedBy.indexOf(currentGuest);
-    if (index > -1) {
-        item.claimedBy.splice(index, 1);
-    } else {
-        item.claimedBy.push(currentGuest);
-    }
-    
-    // Reset confirmation status when items change
-    if (receiptData.confirmedGuests && receiptData.confirmedGuests[currentGuest]) {
-        delete receiptData.confirmedGuests[currentGuest];
-    }
-    
-    const urlParams = new URLSearchParams(window.location.search);
-    const receiptId = urlParams.get('receipt');
-    localStorage.setItem(`receipt_${receiptId}`, JSON.stringify(receiptData));
-    
-    renderGuestItems();
-}
 
 function updateGuestTotal() {
     if (!currentGuest) return;
@@ -534,43 +621,6 @@ function updateGuestTotal() {
     }
 }
 
-function confirmSelectionWithHost() {
-    if (!currentGuest) {
-        alert('Please set your name first');
-        return;
-    }
-    
-    const myItems = receiptData.items.filter(item => 
-        item.claimedBy.includes(currentGuest)
-    );
-    
-    if (myItems.length === 0) {
-        alert('Please select at least one item before confirming');
-        return;
-    }
-    
-    // Mark this guest as confirmed
-    if (!receiptData.confirmedGuests) {
-        receiptData.confirmedGuests = {};
-    }
-    
-    receiptData.confirmedGuests[currentGuest] = {
-        confirmedAt: new Date().toISOString(),
-        items: myItems.map(item => item.name),
-        total: myItems.reduce((sum, item) => sum + item.price, 0)
-    };
-    
-    // Save to localStorage
-    const urlParams = new URLSearchParams(window.location.search);
-    const receiptId = urlParams.get('receipt');
-    localStorage.setItem(`receipt_${receiptId}`, JSON.stringify(receiptData));
-    
-    // Update the display
-    updateGuestTotal();
-    
-    // Show success feedback
-    alert('Your selection has been confirmed! The host can now see that you\'ve made your selection.');
-}
 
 function makeChangesToSelection() {
     // Remove confirmation status
