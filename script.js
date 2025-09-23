@@ -532,7 +532,15 @@ function refreshSummary() {
     if (receiptId) {
         const savedData = localStorage.getItem(`receipt_${receiptId}`);
         if (savedData) {
-            receiptData = JSON.parse(savedData);
+            const updatedData = JSON.parse(savedData);
+            // Merge the updated data while preserving current form values if we're the host
+            if (isHost) {
+                receiptData.items = updatedData.items; // Get updated claims
+                receiptData.payments = updatedData.payments; // Get updated payments
+                // Keep current form values for tax/tip/name
+            } else {
+                receiptData = updatedData;
+            }
         }
     }
     
@@ -541,7 +549,7 @@ function refreshSummary() {
     // Show feedback
     const button = event.target;
     const originalText = button.textContent;
-    button.textContent = 'Updated';
+    button.textContent = '✓ Updated';
     
     setTimeout(() => {
         button.textContent = originalText;
