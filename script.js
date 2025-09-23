@@ -434,3 +434,250 @@ setInterval(autoSave, 3000);
 document.addEventListener('DOMContentLoaded', function() {
     setTimeout(loadDraft, 100); // Small delay to ensure other init functions run first
 });
+
+// Add to the global state (update the existing receiptData object)
+let receiptData = {
+    name: '',
+    items: [],
+    tax: 0,
+    tip: 0,
+    people: {},
+    payments: {} // New: track payments
+};
+
+// Update the renderSummary function (replace the existing one)
+function renderSummary() {
+    const summaryContainer = document.getElementById('summary-content');
+    const people = {};
+    
+    // Calculate each person's share
+    receiptData.items.forEach(item => {
+        item.claimedBy.forEach(person => {
+            if (!people[person]) {
+                people[person] = { items: [], subtotal: 0 };
+            }
+            people[person].items.push(item);
+            people[person].subtotal += item.price;
+        });
+    });
+    
+    const totalItemsValue = receiptData.items.reduce((sum, item) => sum + item.price, 0);
+    const totalBill = totalItemsValue + receiptData.tax + receiptData.tip;
+    
+    let summaryHtml = `
+        <div class="summary-card">
+            <div class="summary-name">📋 ${receiptData.name}</div>
+            <div class="summary-items">
+                <strong>Items Total:</strong> $${totalItemsValue.toFixed(2)} | 
+                <strong>Tax:</strong> $${receiptData.tax.toFixed(2)} | 
+                <strong>Tip:</strong> $${receiptData.tip.toFixed(2)} | 
+                <strong>Grand Total:</strong> $${totalBill.toFixed(2)}
+            </div>
+        </div>
+    `;
+    
+    // Payment tracking summary
+    let totalPaid = 0;
+    let totalOwed = 0;
+    
+    // Show each person's breakdown with payment status
+    Object.keys(people).forEach(person => {
+        const personData = people[person];
+        const myProportion = totalItemsValue > 0 ? personData.subtotal / totalItemsValue : 0;
+        const myTax = receiptData.tax * myProportion;
+        const myTip = receiptData.tip * myProportion;
+        const total = personData.subtotal + myTax + myTip;
+        const paid = receiptData.payments[person] || 0;
+        const balance = total - paid;
+        
+        totalOwed += total;
+        totalPaid += paid;
+        
+        const paymentStatus = balance <= 0.01 ? 'paid' : balance < total ? 'partial' : 'unpaid';
+        const statusIcon = balance <= 0.01 ? '✅' : balance < total ? '🟡' : '❌';
+        const statusColor = balance <= 0.01 ? '#38a169' : balance < total ? '#d69e2e' : '#e53e3e';
+        
+        summaryHtml += `
+            <div class="summary-card ${paymentStatus}">
+                <div class="summary-name">
+                    ${statusIcon} ${person}
+                    <span class="payment-status" style="color: ${statusColor}; font-size: 0.9rem; font-weight: normal;">
+                        ${balance <= 0.01 ? 'PAID' : balance < total ? 'PARTIAL' : 'UNPAID'}
+                    </span>
+                </div>
+                <div class="summary-items">
+                    <strong>Items:</strong> ${personData.items.map(item => item.name).join(', ')}<br>
+                    <strong>Breakdown:</strong> $${personData.subtotal.toFixed(2)} (items) + $${myTax.toFixed(2)} (tax) + $${myTip.toFixed(2)} (tip)
+                </div>
+                <div class="payment-tracking">
+                    <div class="amount-owed">Owes: $${total.toFixed(2)}</div>
+                    <div class="payment-input">
+                        <label>Amount Paid:</label>
+                        <input type="number" step="0.01" value="${paid.toFixed(2)}" 
+                               onchange="updatePayment('${person}', this.value)"
+                               class="payment-amount">
+                    </div>
+                    <div class="balance" style="color: ${statusColor}; font-weight: bold;">
+                        Balance: $${balance.toFixed(2)}
+                    </div>
+                </div>
+            </div>
+        `;
+    });
+    
+    // Overall payment summary
+    const remainingBalance = totalOwed - totalPaid;
+    summaryHtml += `
+        <div class="summary-card payment-summary">
+            <div class="summary-name">💰 Payment Summary</div>
+            <div class="payment-totals">
+                <div class="total-row">
+                    <span>Total Owed:</span>
+                    <span class="amount">$${totalOwed.toFixed(2)}</span>
+                </div>
+                <div class="total-row">
+                    <span>Total Paid:</span>
+                    <span class="amount paid">$${totalPaid.toFixed(2)}</span>
+                </div>
+                <div class="total-row balance-row">
+                    <span>Remaining Balance:</span>
+                    <span class="amount ${remainingBalance <= 0.01 ? 'paid' : 'unpaid'}">
+                        $${remainingBalance.toFixed(2)}
+                    </span>
+                </div>
+            </div>
+            ${remainingBalance <= 0.01 ? 
+                '<div class="all-paid">🎉 All payments received!</div>' : 
+                `<div class="pending-payment">Still waiting for $${remainingBalance.toFixed(2)}</div>`
+            }
+        </div>
+    `;
+    
+    // Show unclaimed items
+    const unclaimedItems = receiptData.items.filter(item => 
+        item.claimedBy.length === 0
+    );
+    
+    if (unclaimedItems.length > 0) {
+        const unclaimedTotal = unclaimedItems.reduce((sum, item) => sum + item.price, 0);
+        summaryHtml += `
+            <div class="summary-card unclaimed-items">
+                <div class="summary-name">⚠️ Unclaimed Items</div>
+                <div class="summary-items">
+                    <strong>Items:</strong> ${unclaimedItems.map(item => `${item.name} ($${item.price.toFixed(2)})`).join(', ')}<br>
+                    <strong>Total Value:</strong> $${unclaimedTotal.toFixed(2)}
+                </div>
+                <div style="color: #c53030; font-weight: 600; margin-top: 10px;">
+                    These items need to be claimed by someone or split equally.
+                </div>
+            </div>
+        `;
+    }
+    
+    summaryContainer.innerHTML = summaryHtml;
+}
+
+// New function to update payment amounts
+function updatePayment(person, amount) {
+    const paymentAmount = parseFloat(amount) || 0;
+    receiptData.payments[person] = paymentAmount;
+    
+    // Save to localStorage
+    const urlParams = new URLSearchParams(window.location.search);
+    const receiptId = urlParams.get('receipt');
+    
+    if (receiptId) {
+        localStorage.setItem(`receipt_${receiptId}`, JSON.stringify(receiptData));
+    } else {
+        // Save draft
+        localStorage.setItem('receipt_draft', JSON.stringify(receiptData));
+    }
+    
+    // Re-render summary to update colors and status
+    renderSummary();
+}
+
+// Add payment tracking to guest total section (update the updateGuestTotal function)
+function updateGuestTotal() {
+    if (!currentGuest) return;
+    
+    const myItems = receiptData.items.filter(item => 
+        item.claimedBy.includes(currentGuest)
+    );
+    
+    if (myItems.length === 0) {
+        document.getElementById('guest-total').style.display = 'none';
+        return;
+    }
+    
+    document.getElementById('guest-total').style.display = 'block';
+    
+    const subtotal = myItems.reduce((sum, item) => sum + item.price, 0);
+    const totalItemsValue = receiptData.items.reduce((sum, item) => sum + item.price, 0);
+    const myProportion = totalItemsValue > 0 ? subtotal / totalItemsValue : 0;
+    
+    const myTax = receiptData.tax * myProportion;
+    const myTip = receiptData.tip * myProportion;
+    const total = subtotal + myTax + myTip;
+    
+    // Show payment confirmation button for guests
+    const totalContainer = document.getElementById('guest-total');
+    totalContainer.innerHTML = `
+        <h3>Your Total</h3>
+        <p><strong>Items:</strong> $${subtotal.toFixed(2)}</p>
+        <p><strong>Tax (your share):</strong> $${myTax.toFixed(2)}</p>
+        <p><strong>Tip (your share):</strong> $${myTip.toFixed(2)}</p>
+        <div class="total-amount">You Owe: $${total.toFixed(2)}</div>
+        <div class="payment-confirmation">
+            <p style="margin: 15px 0 10px 0; font-size: 0.95rem; color: #4a5568;">
+                💡 <strong>Payment Instructions:</strong><br>
+                Please pay $${total.toFixed(2)} to the host and let them know you've paid.
+            </p>
+            <button onclick="confirmPayment()" class="confirm-payment-btn">
+                ✓ I've Paid $${total.toFixed(2)}
+            </button>
+        </div>
+    `;
+}
+
+// New function for guest payment confirmation
+function confirmPayment() {
+    if (!currentGuest) return;
+    
+    const myItems = receiptData.items.filter(item => 
+        item.claimedBy.includes(currentGuest)
+    );
+    const subtotal = myItems.reduce((sum, item) => sum + item.price, 0);
+    const totalItemsValue = receiptData.items.reduce((sum, item) => sum + item.price, 0);
+    const myProportion = totalItemsValue > 0 ? subtotal / totalItemsValue : 0;
+    const myTax = receiptData.tax * myProportion;
+    const myTip = receiptData.tip * myProportion;
+    const total = subtotal + myTax + myTip;
+    
+    // Record the payment
+    if (!receiptData.payments) receiptData.payments = {};
+    receiptData.payments[currentGuest] = total;
+    
+    // Save to localStorage
+    const urlParams = new URLSearchParams(window.location.search);
+    const receiptId = urlParams.get('receipt');
+    localStorage.setItem(`receipt_${receiptId}`, JSON.stringify(receiptData));
+    
+    // Show confirmation
+    alert(`✅ Payment confirmed! You've marked $${total.toFixed(2)} as paid.\n\nThe host can now see your payment status.`);
+    
+    // Update the display
+    const totalContainer = document.getElementById('guest-total');
+    const currentHTML = totalContainer.innerHTML;
+    totalContainer.innerHTML = currentHTML.replace(
+        /<div class="payment-confirmation">.*?<\/div>/s,
+        `<div class="payment-confirmed" style="background: #f0fff4; padding: 15px; border-radius: 8px; margin-top: 15px; border: 2px solid #9ae6b4; text-align: center;">
+            <div style="color: #22543d; font-weight: bold; font-size: 1.1rem;">
+                ✅ Payment Confirmed!
+            </div>
+            <div style="color: #2f855a; margin-top: 5px;">
+                You've marked $${total.toFixed(2)} as paid
+            </div>
+        </div>`
+    );
+}
