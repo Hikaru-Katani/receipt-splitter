@@ -346,8 +346,13 @@ function renderSummary() {
         </div>
     `;
     
-    // Check if anyone has claimed items yet
-    const hasPeopleClaims = Object.keys(people).length > 0;
+    // FIXED: Better detection of people with claims
+    const peopleWithClaims = Object.keys(people);
+    const hasPeopleClaims = peopleWithClaims.length > 0;
+    
+    // Debug info (remove this in production)
+    console.log('People with claims:', peopleWithClaims);
+    console.log('Has people claims:', hasPeopleClaims);
     
     if (hasPeopleClaims) {
         // Payment tracking summary
@@ -356,7 +361,7 @@ function renderSummary() {
         const owingDetails = [];
         
         // Show each person's breakdown with payment status
-        Object.keys(people).forEach(person => {
+        peopleWithClaims.forEach(person => {
             const personData = people[person];
             const myProportion = totalItemsValue > 0 ? personData.subtotal / totalItemsValue : 0;
             const myTax = receiptData.tax * myProportion;
@@ -428,7 +433,7 @@ function renderSummary() {
                 </div>
         `;
         
-        // Add "Who Owes How Much" section - THIS WAS THE MISSING PART
+        // Add "Who Owes How Much" section
         if (owingDetails.length > 0) {
             summaryHtml += `
                 <div class="who-owes-section">
@@ -598,6 +603,23 @@ function loadDraft() {
             renderItems();
         }
     }
+}
+
+// NEW: Function to edit receipt items
+function editReceipt() {
+    // Ask for confirmation since this might affect shared links
+    const hasSharedLink = document.getElementById('share-link').style.display !== 'none';
+    if (hasSharedLink) {
+        if (!confirm('This receipt has been shared with others. Editing items might affect their selections. Continue?')) {
+            return;
+        }
+    }
+    
+    document.getElementById('summary-section').style.display = 'none';
+    document.getElementById('host-section').style.display = 'block';
+    
+    // Focus on add item field for quick editing
+    document.getElementById('item-name').focus();
 }
 
 // Auto-save every few seconds
