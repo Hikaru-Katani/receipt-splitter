@@ -307,6 +307,7 @@ function renderSummary() {
     // Payment tracking summary
     let totalPaid = 0;
     let totalOwed = 0;
+    const owingDetails = [];
     
     // Show each person's breakdown with payment status
     Object.keys(people).forEach(person => {
@@ -320,6 +321,11 @@ function renderSummary() {
         
         totalOwed += total;
         totalPaid += paid;
+        
+        // Track who owes what for the summary
+        if (balance > 0.01) {
+            owingDetails.push({ person, amount: balance });
+        }
         
         const paymentStatus = balance <= 0.01 ? 'paid' : balance < total ? 'partial' : 'unpaid';
         const statusIcon = balance <= 0.01 ? '✅' : balance < total ? '🟡' : '❌';
@@ -338,7 +344,7 @@ function renderSummary() {
                     <strong>Breakdown:</strong> $${personData.subtotal.toFixed(2)} (items) + $${myTax.toFixed(2)} (tax) + $${myTip.toFixed(2)} (tip)
                 </div>
                 <div class="payment-tracking">
-                    <div class="amount-owed">Owes: $${total.toFixed(2)}</div>
+                    <div class="amount-owed">Total Bill: $${total.toFixed(2)}</div>
                     <div class="payment-input">
                         <label>Amount Paid:</label>
                         <input type="number" step="0.01" value="${paid.toFixed(2)}" 
@@ -346,18 +352,18 @@ function renderSummary() {
                                class="payment-amount">
                     </div>
                     <div class="balance" style="color: ${statusColor}; font-weight: bold;">
-                        Balance: $${balance.toFixed(2)}
+                        ${balance <= 0.01 ? 'Fully Paid' : `Still Owes: $${balance.toFixed(2)}`}
                     </div>
                 </div>
             </div>
         `;
     });
     
-    // Overall payment summary
+    // Overall payment summary with "Who Owes How Much"
     const remainingBalance = totalOwed - totalPaid;
     summaryHtml += `
         <div class="summary-card payment-summary">
-            <div class="summary-name">Payment Summary</div>
+            <div class="summary-name">💰 Payment Summary</div>
             <div class="payment-totals">
                 <div class="total-row">
                     <span>Total Owed:</span>
@@ -374,9 +380,35 @@ function renderSummary() {
                     </span>
                 </div>
             </div>
+    `;
+    
+    // Add "Who Owes How Much" section
+    if (owingDetails.length > 0) {
+        summaryHtml += `
+            <div class="who-owes-section">
+                <h4 style="margin: 20px 0 10px 0; color: #2d3748; font-size: 1.1rem;">📋 Who Still Owes Money:</h4>
+                <ul style="margin: 0; padding: 0; list-style: none;">
+        `;
+        
+        owingDetails.forEach(({ person, amount }) => {
+            summaryHtml += `
+                <li style="padding: 8px 0; border-bottom: 1px solid #e2e8f0; display: flex; justify-content: space-between;">
+                    <span style="font-weight: 600;">${person}</span>
+                    <span style="color: #e53e3e; font-weight: 700;">$${amount.toFixed(2)}</span>
+                </li>
+            `;
+        });
+        
+        summaryHtml += `
+                </ul>
+            </div>
+        `;
+    }
+    
+    summaryHtml += `
             ${remainingBalance <= 0.01 ? 
-                '<div class="all-paid">All payments received!</div>' : 
-                `<div class="pending-payment">Still waiting for $${remainingBalance.toFixed(2)}</div>`
+                '<div class="all-paid">🎉 All payments received!</div>' : 
+                `<div class="pending-payment">Still waiting for $${remainingBalance.toFixed(2)} total</div>`
             }
         </div>
     `;
@@ -390,7 +422,7 @@ function renderSummary() {
         const unclaimedTotal = unclaimedItems.reduce((sum, item) => sum + item.price, 0);
         summaryHtml += `
             <div class="summary-card unclaimed-items">
-                <div class="summary-name">Unclaimed Items</div>
+                <div class="summary-name">⚠️ Unclaimed Items</div>
                 <div class="summary-items">
                     <strong>Items:</strong> ${unclaimedItems.map(item => `${item.name} ($${item.price.toFixed(2)})`).join(', ')}<br>
                     <strong>Total Value:</strong> $${unclaimedTotal.toFixed(2)}
