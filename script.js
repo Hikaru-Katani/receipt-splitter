@@ -1111,3 +1111,93 @@ function initializeApp() {
         alert('There was an error loading the app. Please refresh the page.');
     }
 }
+
+// Add this to your JavaScript
+const JSONBIN_API_KEY = 'YOUR_API_KEY'; // Get free key from jsonbin.io
+
+async function generateShareLink() {
+    const receiptName = document.getElementById('receipt-name').value.trim();
+    const tax = parseFloat(document.getElementById('tax-amount').value) || 0;
+    const tip = parseFloat(document.getElementById('tip-amount').value) || 0;
+    
+    if (!receiptName) {
+        alert('Please enter a receipt name');
+        document.getElementById('receipt-name').focus();
+        return;
+    }
+    
+    if (receiptData.items.length === 0) {
+        alert('Please add at least one item from your receipt');
+        document.getElementById('item-name').focus();
+        return;
+    }
+    
+    receiptData.name = receiptName;
+    receiptData.tax = tax;
+    receiptData.tip = tip;
+    
+    try {
+        // Upload to JSONBin
+        const response = await fetch('https://api.jsonbin.io/v3/b', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-Master-Key': JSONBIN_API_KEY
+            },
+            body: JSON.stringify(receiptData)
+        });
+        
+        const result = await response.json();
+        const binId = result.metadata.id;
+        
+        const shareUrl = `${window.location.origin}${window.location.pathname}?receipt=${binId}`;
+        document.getElementById('share-url').value = shareUrl;
+        document.getElementById('share-link').style.display = 'block';
+        
+        // Save locally too
+        currentReceiptId = binId;
+        localStorage.setItem(`receipt_${currentReceiptId}`, JSON.stringify(receiptData));
+        
+        document.getElementById('share-link').scrollIntoView({ behavior: 'smooth' });
+    } catch (error) {
+        console.error('Error creating share link:', error);
+        alert('Error creating share link. Please try again.');
+    }
+}
+
+async function loadSharedReceipt(receiptId) {
+    try {
+        // First try localStorage
+        let savedData = localStorage.getItem(`receipt_${receiptId}`);
+        
+        if (!savedData) {
+            // If not in localStorage, try fetching from JSONBin
+            const response = await fetch(`https://api.jsonbin.io/v3/b/${receiptId}/latest`, {
+                headers: {
+                    'X-Master-Key': JSONBIN_API_KEY
+                }
+            });
+            
+            if (response.ok) {
+                const result = await response.json();
+                savedData = JSON.stringify(result.record);
+                // Cache locally
+                localStorage.setItem(`receipt_${receiptId}`, savedData);
+            }
+        }
+        
+        if (savedData) {
+            receiptData = JSON.parse(savedData);
+            if (!receiptData.confirmedGuests) {
+                receiptData.confirmedGuests = {};
+            }
+            document.getElementById('receipt-title').textContent = receiptData.name;
+            renderGuestItems();
+        } else {
+            alert('Receipt not found! Please check your link.');
+        }
+    } catch (error) {
+        console.error('Error loading receipt:', error);
+        alert('Error loading receipt. Please check your link.');
+    }
+}
