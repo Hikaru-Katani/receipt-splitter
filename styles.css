@@ -440,3 +440,167 @@ header p {
         font-size: 2.2rem;
     }
 }
+
+/* Payment tracking styles */
+.payment-tracking {
+    margin-top: 15px;
+    padding: 15px;
+    background: #f7fafc;
+    border-radius: 8px;
+    border: 1px solid #e2e8f0;
+}
+
+.amount-owed {
+    font-size: 1.2rem;
+    font-weight: 700;
+    color: #2d3748;
+    margin-bottom: 10px;
+}
+
+.payment-input {
+    margin: 10px 0;
+}
+
+.payment-input label {
+    display: block;
+    font-weight: 600;
+    color: #4a5568;
+    margin-bottom: 5px;
+    font-size: 0.9rem;
+}
+
+.payment-amount {
+    width: 120px;
+    padding: 8px 12px;
+    border: 2px solid #e2e8f0;
+    border-radius: 6px;
+    font-size: 1rem;
+    font-weight: 600;
+}
+
+.payment-amount:focus {
+    outline: none;
+    border-color: #667eea;
+    box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+}
+
+.balance {
+    font-size: 1.1rem;
+    margin-top: 8px;
+}
+
+.payment-status {
+    float: right;
+    font-size: 0.85rem !important;
+    padding: 4px 8px;
+    border-radius: 4px;
+    background: rgba(255,255,255,0.2);
+}
+
+.summary-card.paid {
+    border-left-color: #38a169;
+    background: linear-gradient(45deg, #f0fff4, #ffffff);
+}
+
+.summary-card.partial {
+    border-left-color: #d69e2e;
+    background: linear-gradient(45deg, #fffaf0, #ffffff);
+}
+
+.summary-card.unpaid {
+    border-left-color: #e53e3e;
+    background: linear-gradient(45deg, #fed7d7, #ffffff);
+}
+
+.payment-summary {
+    background: linear-gradient(45deg, #e6fffa, #f0fff4) !important;
+    border-left-color: #38a169 !important;
+}
+
+.payment-totals {
+    margin-top: 15px;
+}
+
+.total-row {
+    display: flex;
+    justify-content: space-between;
+    margin-bottom: 8px;
+    font-size: 1.1rem;
+}
+
+.balance-row {
+    border-top: 2px solid #38a169;
+    padding-top: 8px;
+    margin-top: 10px;
+    font-weight: 700;
+}
+
+.total-row .amount {
+    font-weight: 600;
+}
+
+.total-row .amount.paid {
+    color: #38a169;
+}
+
+.total-row .amount.unpaid {
+    color: #e53e3e;
+}
+
+.all-paid {
+    background: #38a169;
+    color: white;
+    padding: 10px;
+    border-radius: 6px;
+    text-align: center;
+    margin-top: 15px;
+    font-weight: 600;
+}
+
+.pending-payment {
+    background: #fed7d7;
+    color: #c53030;
+    padding: 10px;
+    border-radius: 6px;
+    text-align: center;
+    margin-top: 15px;
+    font-weight: 600;
+}
+
+.confirm-payment-btn {
+    width: 100%;
+    background: linear-gradient(45deg, #38a169, #48bb78);
+    color: white;
+    border: none;
+    padding: 12px;
+    border-radius: 8px;
+    font-size: 1rem;
+    font-weight: 600;
+    cursor: pointer;
+    margin-top: 10px;
+    transition: all 0.3s ease;
+}
+
+.confirm-payment-btn:hover {
+    background: linear-gradient(45deg, #2f855a, #38a169);
+    transform: translateY(-1px);
+}
+
+.payment-confirmation {
+    margin-top: 15px;
+    padding: 15px;
+    background: #f7fafc;
+    border-radius: 8px;
+    border: 1px solid #e2e8f0;
+}
+
+@media (max-width: 768px) {
+    .payment-amount {
+        width: 100px;
+        font-size: 0.9rem;
+    }
+    
+    .total-row {
+        font-size: 1rem;
+    }
+}
