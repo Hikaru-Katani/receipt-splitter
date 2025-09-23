@@ -317,6 +317,8 @@ function showSummary() {
 }
 
 function renderSummary() {
+    // Sync with shared data before rendering
+    syncWithSharedData();
     const summaryContainer = document.getElementById('summary-content');
     const people = {};
     
@@ -628,6 +630,27 @@ function editReceipt() {
     
     // Focus on add item field for quick editing
     document.getElementById('item-name').focus();
+}
+
+// NEW: Function to automatically sync data with localStorage
+function syncWithSharedData() {
+    if (!isHost) return; // Only for host
+    
+    const shareUrl = document.getElementById('share-url').value;
+    if (shareUrl) {
+        const urlParams = new URLSearchParams(shareUrl.split('?')[1]);
+        const receiptId = urlParams.get('receipt');
+        
+        if (receiptId) {
+            const savedData = localStorage.getItem(`receipt_${receiptId}`);
+            if (savedData) {
+                const sharedReceiptData = JSON.parse(savedData);
+                // Only update items and payments, keep current form values
+                receiptData.items = sharedReceiptData.items;
+                receiptData.payments = sharedReceiptData.payments || {};
+            }
+        }
+    }
 }
 
 // Auto-save every few seconds
