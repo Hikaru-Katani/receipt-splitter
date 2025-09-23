@@ -7,7 +7,8 @@ let receiptData = {
     tax: 0,
     tip: 0,
     people: {},
-    payments: {}
+    payments: {},
+    confirmedGuests: {}
 };
 
 let currentGuest = '';
@@ -153,7 +154,8 @@ function createNewReceipt() {
         tax: 0,
         tip: 0,
         people: {},
-        payments: {}
+        payments: {},
+        confirmedGuests: {}
     };
     
     // Clear form fields
@@ -175,6 +177,11 @@ function editReceipt(receiptId) {
     currentReceiptId = receiptId;
     receiptData = { ...receipts[receiptId] };
     
+    // Ensure confirmedGuests exists
+    if (!receiptData.confirmedGuests) {
+        receiptData.confirmedGuests = {};
+    }
+    
     // Populate form fields
     document.getElementById('receipt-name').value = receiptData.name || '';
     document.getElementById('tax-amount').value = receiptData.tax || '';
@@ -182,10 +189,15 @@ function editReceipt(receiptId) {
     document.getElementById('item-name').value = '';
     document.getElementById('item-price').value = '';
     
-    // Check if this receipt has been shared
-    const shareUrl = `${window.location.origin}${window.location.pathname}?receipt=${receiptId}`;
-    document.getElementById('share-url').value = shareUrl;
-    document.getElementById('share-link').style.display = 'block';
+    // Set up share link if this receipt has items
+    if (receiptData.items.length > 0) {
+        const shareUrl = `${window.location.origin}${window.location.pathname}?receipt=${receiptId}`;
+        document.getElementById('share-url').value = shareUrl;
+        document.getElementById('share-link').style.display = 'block';
+    } else {
+        document.getElementById('share-link').style.display = 'none';
+        document.getElementById('share-url').value = '';
+    }
     
     showHostSection();
     renderItems();
@@ -195,6 +207,11 @@ function editReceipt(receiptId) {
 function viewReceiptSummary(receiptId) {
     currentReceiptId = receiptId;
     receiptData = { ...receipts[receiptId] };
+    
+    // Ensure confirmedGuests exists
+    if (!receiptData.confirmedGuests) {
+        receiptData.confirmedGuests = {};
+    }
     
     showSummarySection();
     renderSummary();
@@ -357,6 +374,12 @@ function loadSharedReceipt(receiptId) {
     const savedData = localStorage.getItem(`receipt_${receiptId}`);
     if (savedData) {
         receiptData = JSON.parse(savedData);
+        
+        // Ensure confirmedGuests exists
+        if (!receiptData.confirmedGuests) {
+            receiptData.confirmedGuests = {};
+        }
+        
         document.getElementById('receipt-title').textContent = receiptData.name;
         renderGuestItems();
     } else {
@@ -429,6 +452,11 @@ function toggleItemSelection(itemId) {
         item.claimedBy.push(currentGuest);
     }
     
+    // Reset confirmation status when items change
+    if (receiptData.confirmedGuests && receiptData.confirmedGuests[currentGuest]) {
+        delete receiptData.confirmedGuests[currentGuest];
+    }
+    
     const urlParams = new URLSearchParams(window.location.search);
     const receiptId = urlParams.get('receipt');
     localStorage.setItem(`receipt_${receiptId}`, JSON.stringify(receiptData));
@@ -458,14 +486,105 @@ function updateGuestTotal() {
     const myTip = receiptData.tip * myProportion;
     const total = subtotal + myTax + myTip;
     
+    // Check if already confirmed
+    const isConfirmed = receiptData.confirmedGuests && receiptData.confirmedGuests[currentGuest];
+    
     const totalContainer = document.getElementById('guest-total');
-    totalContainer.innerHTML = `
-        <h3>Your Total</h3>
-        <p><strong>Items:</strong> $${subtotal.toFixed(2)}</p>
-        <p><strong>Tax (your share):</strong> $${myTax.toFixed(2)}</p>
-        <p><strong>Tip (your share):</strong> $${myTip.toFixed(2)}</p>
-        <div class="total-amount">You Owe: $${total.toFixed(2)}</div>
-    `;
+    
+    if (isConfirmed) {
+        // Show confirmed state
+        totalContainer.innerHTML = `
+            <h3>Selection Confirmed!</h3>
+            <p><strong>Items:</strong> $${subtotal.toFixed(2)}</p>
+            <p><strong>Tax (your share):</strong> $${myTax.toFixed(2)}</p>
+            <p><strong>Tip (your share):</strong> $${myTip.toFixed(2)}</p>
+            <div class="total-amount">You Owe: $${total.toFixed(2)}</div>
+            
+            <div class="confirmation-success">
+                <div class="success-message">
+                    Your selection has been confirmed and sent to the host!
+                </div>
+                <p class="success-note">
+                    The host can now see that you've confirmed your items. 
+                    You can still make changes if needed.
+                </p>
+                <button onclick="makeChangesToSelection()" class="secondary-btn">
+                    Make Changes
+                </button>
+            </div>
+        `;
+    } else {
+        // Show unconfirmed state with confirm button
+        totalContainer.innerHTML = `
+            <h3>Your Selection</h3>
+            <p><strong>Items:</strong> $${subtotal.toFixed(2)}</p>
+            <p><strong>Tax (your share):</strong> $${myTax.toFixed(2)}</p>
+            <p><strong>Tip (your share):</strong> $${myTip.toFixed(2)}</p>
+            <div class="total-amount">You Owe: $${total.toFixed(2)}</div>
+            
+            <div class="guest-confirm-section">
+                <button onclick="confirmSelectionWithHost()" class="confirm-selection-btn">
+                    Confirm My Selection
+                </button>
+                <p class="confirm-note">
+                    Click to confirm your items and notify the host that you've made your selection.
+                </p>
+            </div>
+        `;
+    }
+}
+
+function confirmSelectionWithHost() {
+    if (!currentGuest) {
+        alert('Please set your name first');
+        return;
+    }
+    
+    const myItems = receiptData.items.filter(item => 
+        item.claimedBy.includes(currentGuest)
+    );
+    
+    if (myItems.length === 0) {
+        alert('Please select at least one item before confirming');
+        return;
+    }
+    
+    // Mark this guest as confirmed
+    if (!receiptData.confirmedGuests) {
+        receiptData.confirmedGuests = {};
+    }
+    
+    receiptData.confirmedGuests[currentGuest] = {
+        confirmedAt: new Date().toISOString(),
+        items: myItems.map(item => item.name),
+        total: myItems.reduce((sum, item) => sum + item.price, 0)
+    };
+    
+    // Save to localStorage
+    const urlParams = new URLSearchParams(window.location.search);
+    const receiptId = urlParams.get('receipt');
+    localStorage.setItem(`receipt_${receiptId}`, JSON.stringify(receiptData));
+    
+    // Update the display
+    updateGuestTotal();
+    
+    // Show success feedback
+    alert('Your selection has been confirmed! The host can now see that you\'ve made your selection.');
+}
+
+function makeChangesToSelection() {
+    // Remove confirmation status
+    if (receiptData.confirmedGuests && receiptData.confirmedGuests[currentGuest]) {
+        delete receiptData.confirmedGuests[currentGuest];
+    }
+    
+    // Save to localStorage
+    const urlParams = new URLSearchParams(window.location.search);
+    const receiptId = urlParams.get('receipt');
+    localStorage.setItem(`receipt_${receiptId}`, JSON.stringify(receiptData));
+    
+    // Update display
+    updateGuestTotal();
 }
 
 function showSummary() {
@@ -485,6 +604,7 @@ function showSummary() {
             const sharedReceiptData = JSON.parse(savedData);
             receiptData.items = sharedReceiptData.items;
             receiptData.payments = sharedReceiptData.payments || {};
+            receiptData.confirmedGuests = sharedReceiptData.confirmedGuests || {};
         }
     }
     
@@ -500,6 +620,7 @@ function renderSummary() {
             const savedReceiptData = JSON.parse(savedData);
             receiptData.items = savedReceiptData.items;
             receiptData.payments = savedReceiptData.payments || {};
+            receiptData.confirmedGuests = savedReceiptData.confirmedGuests || {};
         }
     }
     
@@ -661,6 +782,42 @@ function renderSummary() {
                 }
             </div>
         `;
+        
+        // Add guest confirmation status section
+        if (receiptData.confirmedGuests && Object.keys(receiptData.confirmedGuests).length > 0) {
+            summaryHtml += `
+                <div class="summary-card confirmation-status">
+                    <div class="summary-name">📋 Guest Confirmation Status</div>
+                    <div class="confirmation-list">
+            `;
+            
+            // Show all people who have claimed items and their confirmation status
+            Object.keys(people).forEach(person => {
+                const isConfirmed = receiptData.confirmedGuests[person];
+                const confirmTime = isConfirmed ? new Date(isConfirmed.confirmedAt).toLocaleString() : null;
+                
+                summaryHtml += `
+                    <div class="guest-status ${isConfirmed ? 'confirmed' : 'pending'}">
+                        <div class="guest-info">
+                            <span class="guest-name">${person}</span>
+                            <span class="confirmation-badge">
+                                ${isConfirmed ? '✅ Confirmed' : '⏳ Pending'}
+                            </span>
+                        </div>
+                        ${isConfirmed ? `
+                            <div class="confirm-time">Confirmed: ${confirmTime}</div>
+                        ` : `
+                            <div class="pending-note">Waiting for confirmation</div>
+                        `}
+                    </div>
+                `;
+            });
+            
+            summaryHtml += `
+                    </div>
+                </div>
+            `;
+        }
     } else {
         summaryHtml += `
             <div class="summary-card">
@@ -807,36 +964,9 @@ function loadDraft() {
     }
 }
 
-// Remove the old newReceipt function since we now have createNewReceipt
-// This function is kept for backwards compatibility if called from HTML
+// Backwards compatibility functions
 function newReceipt() {
     createNewReceipt();
-}
-
-// Edit receipt function (alternative to editReceipt for backwards compatibility)
-function editReceipt(receiptId) {
-    currentReceiptId = receiptId;
-    receiptData = { ...receipts[receiptId] };
-    
-    // Populate form fields
-    document.getElementById('receipt-name').value = receiptData.name || '';
-    document.getElementById('tax-amount').value = receiptData.tax || '';
-    document.getElementById('tip-amount').value = receiptData.tip || '';
-    document.getElementById('item-name').value = '';
-    document.getElementById('item-price').value = '';
-    
-    // Set up share link if this receipt has items
-    if (receiptData.items.length > 0) {
-        const shareUrl = `${window.location.origin}${window.location.pathname}?receipt=${receiptId}`;
-        document.getElementById('share-url').value = shareUrl;
-        document.getElementById('share-link').style.display = 'block';
-    } else {
-        document.getElementById('share-link').style.display = 'none';
-        document.getElementById('share-url').value = '';
-    }
-    
-    showHostSection();
-    renderItems();
 }
 
 // Helper function to calculate person's total bill
@@ -855,7 +985,7 @@ function formatCurrency(amount) {
     return `$${amount.toFixed(2)}`;
 }
 
-// Function to export receipt data (bonus feature)
+// Function to export receipt data
 function exportReceiptData(receiptId) {
     const receipt = receipts[receiptId];
     if (receipt) {
@@ -873,7 +1003,7 @@ function exportReceiptData(receiptId) {
     }
 }
 
-// Function to import receipt data (bonus feature)
+// Function to import receipt data
 function importReceiptData(event) {
     const file = event.target.files[0];
     if (file && file.type === 'application/json') {
@@ -883,7 +1013,6 @@ function importReceiptData(event) {
                 const importedReceipt = JSON.parse(e.target.result);
                 const newReceiptId = Date.now().toString();
                 
-                // Validate the imported data structure
                 if (importedReceipt.name !== undefined && Array.isArray(importedReceipt.items)) {
                     localStorage.setItem(`receipt_${newReceiptId}`, JSON.stringify(importedReceipt));
                     loadAllReceipts();
@@ -901,7 +1030,7 @@ function importReceiptData(event) {
     }
 }
 
-// Clean up old localStorage entries (maintenance function)
+// Clean up old localStorage entries
 function cleanupOldReceipts() {
     const oneMonthAgo = Date.now() - (30 * 24 * 60 * 60 * 1000); // 30 days
     let cleanedCount = 0;
@@ -982,10 +1111,3 @@ function initializeApp() {
         alert('There was an error loading the app. Please refresh the page.');
     }
 }
-
-// Replace the DOMContentLoaded event listener with the safer version
-document.addEventListener('DOMContentLoaded', initializeApp);
-
-// Cleanup function that can be called periodically
-// Uncomment the next line if you want automatic cleanup (runs once per session)
-// setTimeout(cleanupOldReceipts, 5000);
