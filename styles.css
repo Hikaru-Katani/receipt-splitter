@@ -780,3 +780,138 @@ header p {
         flex-direction: column;
     }
 }
+
+/* Guest confirmation styles */
+.guest-confirm-section {
+    margin-top: 20px;
+    padding: 20px;
+    background: #f0f8ff;
+    border-radius: 10px;
+    border: 2px solid #4299e1;
+    text-align: center;
+}
+
+.confirm-selection-btn {
+    background: linear-gradient(45deg, #4299e1, #3182ce);
+    color: white;
+    border: none;
+    padding: 15px 25px;
+    border-radius: 10px;
+    font-size: 1.1rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    width: 100%;
+    margin-bottom: 10px;
+}
+
+.confirm-selection-btn:hover {
+    background: linear-gradient(45deg, #3182ce, #2c5aa0);
+    transform: translateY(-2px);
+    box-shadow: 0 4px 15px rgba(66, 153, 225, 0.3);
+}
+
+.confirm-note {
+    color: #2c5aa0;
+    font-size: 0.9rem;
+    margin: 0;
+    font-style: italic;
+}
+
+.confirmation-success {
+    margin-top: 20px;
+    padding: 20px;
+    background: #f0fff4;
+    border-radius: 10px;
+    border: 2px solid #48bb78;
+    text-align: center;
+}
+
+.success-message {
+    color: #22543d;
+    font-weight: 700;
+    font-size: 1.1rem;
+    margin-bottom: 10px;
+}
+
+.success-note {
+    color: #2f855a;
+    font-size: 0.9rem;
+    margin: 10px 0;
+}
+
+/* Host side confirmation status */
+.confirmation-status {
+    background: linear-gradient(45deg, #f0f8ff, #e6f3ff) !important;
+    border-left-color: #4299e1 !important;
+}
+
+.confirmation-list {
+    margin-top: 15px;
+}
+
+.guest-status {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 12px;
+    margin-bottom: 10px;
+    border-radius: 8px;
+    transition: all 0.3s ease;
+}
+
+.guest-status.confirmed {
+    background: #f0fff4;
+    border: 1px solid #9ae6b4;
+}
+
+.guest-status.pending {
+    background: #fffaf0;
+    border: 1px solid #fbd38d;
+}
+
+.guest-info {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.guest-name {
+    font-weight: 600;
+    color: #2d3748;
+}
+
+.confirmation-badge {
+    font-size: 0.85rem;
+    padding: 4px 8px;
+    border-radius: 4px;
+    font-weight: 600;
+}
+
+.guest-status.confirmed .confirmation-badge {
+    background: #c6f6d5;
+    color: #22543d;
+}
+
+.guest-status.pending .confirmation-badge {
+    background: #fed7aa;
+    color: #7b341e;
+}
+
+.confirm-time, .pending-note {
+    font-size: 0.8rem;
+    color: #718096;
+}
+
+@media (max-width: 768px) {
+    .guest-status {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 8px;
+    }
+    
+    .guest-info {
+        width: 100%;
+        justify-content: space-between;
+    }
+}
