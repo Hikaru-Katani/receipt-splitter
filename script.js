@@ -4,7 +4,8 @@ let receiptData = {
     items: [],
     tax: 0,
     tip: 0,
-    people: {}
+    people: {},
+    payments: {} // Track payments
 };
 
 let currentGuest = '';
@@ -14,6 +15,7 @@ let isHost = true;
 document.addEventListener('DOMContentLoaded', function() {
     checkUrlParams();
     renderItems(); // Show empty state initially
+    setTimeout(loadDraft, 100); // Load draft after initialization
 });
 
 function checkUrlParams() {
@@ -107,7 +109,7 @@ function generateShareLink() {
     receiptData.tax = tax;
     receiptData.tip = tip;
     
-    // Save to localStorage (in a real app, this would be sent to a server)
+    // Save to localStorage
     const receiptId = Date.now().toString();
     localStorage.setItem(`receipt_${receiptId}`, JSON.stringify(receiptData));
     
@@ -128,7 +130,7 @@ function copyLink() {
     // Show feedback
     const button = event.target;
     const originalText = button.textContent;
-    button.textContent = 'Copied! ✓';
+    button.textContent = 'Copied!';
     button.style.background = '#38a169';
     
     setTimeout(() => {
@@ -141,6 +143,10 @@ function loadSharedReceipt(receiptId) {
     const savedData = localStorage.getItem(`receipt_${receiptId}`);
     if (savedData) {
         receiptData = JSON.parse(savedData);
+        // Ensure payments object exists
+        if (!receiptData.payments) {
+            receiptData.payments = {};
+        }
         document.getElementById('receipt-title').textContent = receiptData.name;
         renderGuestItems();
     } else {
@@ -245,6 +251,7 @@ function updateGuestTotal() {
     const myTip = receiptData.tip * myProportion;
     const total = subtotal + myTax + myTip;
     
+    // Simple total display without payment confirmation button
     const totalContainer = document.getElementById('guest-total');
     totalContainer.innerHTML = `
         <h3>Your Total</h3>
@@ -252,6 +259,11 @@ function updateGuestTotal() {
         <p><strong>Tax (your share):</strong> $${myTax.toFixed(2)}</p>
         <p><strong>Tip (your share):</strong> $${myTip.toFixed(2)}</p>
         <div class="total-amount">You Owe: $${total.toFixed(2)}</div>
+        <div style="margin-top: 15px; padding: 15px; background: #f7fafc; border-radius: 8px; border: 1px solid #e2e8f0; text-align: center;">
+            <p style="color: #4a5568; font-size: 0.95rem;">
+                💡 Please pay <strong>$${total.toFixed(2)}</strong> to the host
+            </p>
+        </div>
     `;
 }
 
@@ -302,185 +314,11 @@ function renderSummary() {
         </div>
     `;
     
-    // Show each person's breakdown
-    Object.keys(people).forEach(person => {
-        const personData = people[person];
-        const myProportion = totalItemsValue > 0 ? personData.subtotal / totalItemsValue : 0;
-        const myTax = receiptData.tax * myProportion;
-        const myTip = receiptData.tip * myProportion;
-        const total = personData.subtotal + myTax + myTip;
-        
-        summaryHtml += `
-            <div class="summary-card">
-                <div class="summary-name">👤 ${person}</div>
-                <div class="summary-items">
-                    <strong>Items:</strong> ${personData.items.map(item => item.name).join(', ')}<br>
-                    <strong>Breakdown:</strong> $${personData.subtotal.toFixed(2)} (items) + $${myTax.toFixed(2)} (tax) + $${myTip.toFixed(2)} (tip)
-                </div>
-                <div class="summary-total">Owes: $${total.toFixed(2)}</div>
-            </div>
-        `;
-    });
-    
-    // Show unclaimed items
-    const unclaimedItems = receiptData.items.filter(item => 
-        item.claimedBy.length === 0
-    );
-    
-    if (unclaimedItems.length > 0) {
-        const unclaimedTotal = unclaimedItems.reduce((sum, item) => sum + item.price, 0);
-        summaryHtml += `
-            <div class="summary-card unclaimed-items">
-                <div class="summary-name">⚠️ Unclaimed Items</div>
-                <div class="summary-items">
-                    <strong>Items:</strong> ${unclaimedItems.map(item => `${item.name} ($${item.price.toFixed(2)})`).join(', ')}<br>
-                    <strong>Total Value:</strong> $${unclaimedTotal.toFixed(2)}
-                </div>
-                <div style="color: #c53030; font-weight: 600; margin-top: 10px;">
-                    These items need to be claimed by someone or split equally.
-                </div>
-            </div>
-        `;
-    }
-    
-    summaryContainer.innerHTML = summaryHtml;
-}
-
-function refreshSummary() {
-    // Reload data from localStorage if we're viewing a shared receipt
-    const urlParams = new URLSearchParams(window.location.search);
-    const receiptId = urlParams.get('receipt');
-    
-    if (receiptId) {
-        const savedData = localStorage.getItem(`receipt_${receiptId}`);
-        if (savedData) {
-            receiptData = JSON.parse(savedData);
-        }
-    }
-    
-    renderSummary();
-    
-    // Show feedback
-    const button = event.target;
-    const originalText = button.textContent;
-    button.textContent = '✓ Updated';
-    
-    setTimeout(() => {
-        button.textContent = originalText;
-    }, 1500);
-}
-
-function backToHost() {
-    document.getElementById('summary-section').style.display = 'none';
-    document.getElementById('host-section').style.display = 'block';
-}
-
-// Allow Enter key to add items quickly
-document.addEventListener('keydown', function(event) {
-    if (event.key === 'Enter') {
-        const activeElement = document.activeElement;
-        
-        // If in item name or price field, add the item
-        if (activeElement && (activeElement.id === 'item-name' || activeElement.id === 'item-price')) {
-            event.preventDefault();
-            addItem();
-        }
-        
-        // If in guest name field, set the name
-        if (activeElement && activeElement.id === 'guest-name') {
-            event.preventDefault();
-            setGuestName();
-        }
-    }
-});
-
-// Auto-save functionality for host
-function autoSave() {
-    if (isHost && receiptData.items.length > 0) {
-        const receiptName = document.getElementById('receipt-name').value.trim();
-        const tax = parseFloat(document.getElementById('tax-amount').value) || 0;
-        const tip = parseFloat(document.getElementById('tip-amount').value) || 0;
-        
-        receiptData.name = receiptName;
-        receiptData.tax = tax;
-        receiptData.tip = tip;
-        
-        // Save to localStorage with a draft key
-        localStorage.setItem('receipt_draft', JSON.stringify(receiptData));
-    }
-}
-
-// Load draft on page load
-function loadDraft() {
-    if (isHost) {
-        const draftData = localStorage.getItem('receipt_draft');
-        if (draftData) {
-            receiptData = JSON.parse(draftData);
-            
-            // Populate form fields
-            if (receiptData.name) document.getElementById('receipt-name').value = receiptData.name;
-            if (receiptData.tax) document.getElementById('tax-amount').value = receiptData.tax;
-            if (receiptData.tip) document.getElementById('tip-amount').value = receiptData.tip;
-            
-            renderItems();
-        }
-    }
-}
-
-// Auto-save every few seconds
-setInterval(autoSave, 3000);
-
-// Load draft when page loads
-document.addEventListener('DOMContentLoaded', function() {
-    setTimeout(loadDraft, 100); // Small delay to ensure other init functions run first
-});
-
-// Add to the global state (update the existing receiptData object)
-let receiptData = {
-    name: '',
-    items: [],
-    tax: 0,
-    tip: 0,
-    people: {},
-    payments: {} // New: track payments
-};
-
-// Update the renderSummary function (replace the existing one)
-function renderSummary() {
-    const summaryContainer = document.getElementById('summary-content');
-    const people = {};
-    
-    // Calculate each person's share
-    receiptData.items.forEach(item => {
-        item.claimedBy.forEach(person => {
-            if (!people[person]) {
-                people[person] = { items: [], subtotal: 0 };
-            }
-            people[person].items.push(item);
-            people[person].subtotal += item.price;
-        });
-    });
-    
-    const totalItemsValue = receiptData.items.reduce((sum, item) => sum + item.price, 0);
-    const totalBill = totalItemsValue + receiptData.tax + receiptData.tip;
-    
-    let summaryHtml = `
-        <div class="summary-card">
-            <div class="summary-name">📋 ${receiptData.name}</div>
-            <div class="summary-items">
-                <strong>Items Total:</strong> $${totalItemsValue.toFixed(2)} | 
-                <strong>Tax:</strong> $${receiptData.tax.toFixed(2)} | 
-                <strong>Tip:</strong> $${receiptData.tip.toFixed(2)} | 
-                <strong>Grand Total:</strong> $${totalBill.toFixed(2)}
-            </div>
-        </div>
-    `;
-    
     // Payment tracking summary
     let totalPaid = 0;
     let totalOwed = 0;
     
-    // Show each person's breakdown with payment status
+    // Show each person's breakdown with payment tracking
     Object.keys(people).forEach(person => {
         const personData = people[person];
         const myProportion = totalItemsValue > 0 ? personData.subtotal / totalItemsValue : 0;
@@ -577,7 +415,7 @@ function renderSummary() {
     summaryContainer.innerHTML = summaryHtml;
 }
 
-// New function to update payment amounts
+// Update payment amounts
 function updatePayment(person, amount) {
     const paymentAmount = parseFloat(amount) || 0;
     receiptData.payments[person] = paymentAmount;
@@ -597,87 +435,95 @@ function updatePayment(person, amount) {
     renderSummary();
 }
 
-// Add payment tracking to guest total section (update the updateGuestTotal function)
-function updateGuestTotal() {
-    if (!currentGuest) return;
-    
-    const myItems = receiptData.items.filter(item => 
-        item.claimedBy.includes(currentGuest)
-    );
-    
-    if (myItems.length === 0) {
-        document.getElementById('guest-total').style.display = 'none';
-        return;
-    }
-    
-    document.getElementById('guest-total').style.display = 'block';
-    
-    const subtotal = myItems.reduce((sum, item) => sum + item.price, 0);
-    const totalItemsValue = receiptData.items.reduce((sum, item) => sum + item.price, 0);
-    const myProportion = totalItemsValue > 0 ? subtotal / totalItemsValue : 0;
-    
-    const myTax = receiptData.tax * myProportion;
-    const myTip = receiptData.tip * myProportion;
-    const total = subtotal + myTax + myTip;
-    
-    // Show payment confirmation button for guests
-    const totalContainer = document.getElementById('guest-total');
-    totalContainer.innerHTML = `
-        <h3>Your Total</h3>
-        <p><strong>Items:</strong> $${subtotal.toFixed(2)}</p>
-        <p><strong>Tax (your share):</strong> $${myTax.toFixed(2)}</p>
-        <p><strong>Tip (your share):</strong> $${myTip.toFixed(2)}</p>
-        <div class="total-amount">You Owe: $${total.toFixed(2)}</div>
-        <div class="payment-confirmation">
-            <p style="margin: 15px 0 10px 0; font-size: 0.95rem; color: #4a5568;">
-                💡 <strong>Payment Instructions:</strong><br>
-                Please pay $${total.toFixed(2)} to the host and let them know you've paid.
-            </p>
-            <button onclick="confirmPayment()" class="confirm-payment-btn">
-                ✓ I've Paid $${total.toFixed(2)}
-            </button>
-        </div>
-    `;
-}
-
-// New function for guest payment confirmation
-function confirmPayment() {
-    if (!currentGuest) return;
-    
-    const myItems = receiptData.items.filter(item => 
-        item.claimedBy.includes(currentGuest)
-    );
-    const subtotal = myItems.reduce((sum, item) => sum + item.price, 0);
-    const totalItemsValue = receiptData.items.reduce((sum, item) => sum + item.price, 0);
-    const myProportion = totalItemsValue > 0 ? subtotal / totalItemsValue : 0;
-    const myTax = receiptData.tax * myProportion;
-    const myTip = receiptData.tip * myProportion;
-    const total = subtotal + myTax + myTip;
-    
-    // Record the payment
-    if (!receiptData.payments) receiptData.payments = {};
-    receiptData.payments[currentGuest] = total;
-    
-    // Save to localStorage
+function refreshSummary() {
+    // Reload data from localStorage if we're viewing a shared receipt
     const urlParams = new URLSearchParams(window.location.search);
     const receiptId = urlParams.get('receipt');
-    localStorage.setItem(`receipt_${receiptId}`, JSON.stringify(receiptData));
     
-    // Show confirmation
-    alert(`✅ Payment confirmed! You've marked $${total.toFixed(2)} as paid.\n\nThe host can now see your payment status.`);
+    if (receiptId) {
+        const savedData = localStorage.getItem(`receipt_${receiptId}`);
+        if (savedData) {
+            receiptData = JSON.parse(savedData);
+            // Ensure payments object exists
+            if (!receiptData.payments) {
+                receiptData.payments = {};
+            }
+        }
+    }
     
-    // Update the display
-    const totalContainer = document.getElementById('guest-total');
-    const currentHTML = totalContainer.innerHTML;
-    totalContainer.innerHTML = currentHTML.replace(
-        /<div class="payment-confirmation">.*?<\/div>/s,
-        `<div class="payment-confirmed" style="background: #f0fff4; padding: 15px; border-radius: 8px; margin-top: 15px; border: 2px solid #9ae6b4; text-align: center;">
-            <div style="color: #22543d; font-weight: bold; font-size: 1.1rem;">
-                ✅ Payment Confirmed!
-            </div>
-            <div style="color: #2f855a; margin-top: 5px;">
-                You've marked $${total.toFixed(2)} as paid
-            </div>
-        </div>`
-    );
+    renderSummary();
+    
+    // Show feedback
+    const button = event.target;
+    const originalText = button.textContent;
+    button.textContent = '✓ Updated';
+    
+    setTimeout(() => {
+        button.textContent = originalText;
+    }, 1500);
 }
+
+function backToHost() {
+    document.getElementById('summary-section').style.display = 'none';
+    document.getElementById('host-section').style.display = 'block';
+}
+
+// Allow Enter key to add items quickly
+document.addEventListener('keydown', function(event) {
+    if (event.key === 'Enter') {
+        const activeElement = document.activeElement;
+        
+        // If in item name or price field, add the item
+        if (activeElement && (activeElement.id === 'item-name' || activeElement.id === 'item-price')) {
+            event.preventDefault();
+            addItem();
+        }
+        
+        // If in guest name field, set the name
+        if (activeElement && activeElement.id === 'guest-name') {
+            event.preventDefault();
+            setGuestName();
+        }
+    }
+});
+
+// Auto-save functionality for host
+function autoSave() {
+    if (isHost && receiptData.items.length > 0) {
+        const receiptName = document.getElementById('receipt-name').value.trim();
+        const tax = parseFloat(document.getElementById('tax-amount').value) || 0;
+        const tip = parseFloat(document.getElementById('tip-amount').value) || 0;
+        
+        receiptData.name = receiptName;
+        receiptData.tax = tax;
+        receiptData.tip = tip;
+        
+        // Save to localStorage with a draft key
+        localStorage.setItem('receipt_draft', JSON.stringify(receiptData));
+    }
+}
+
+// Load draft on page load
+function loadDraft() {
+    if (isHost) {
+        const draftData = localStorage.getItem('receipt_draft');
+        if (draftData) {
+            receiptData = JSON.parse(draftData);
+            
+            // Ensure payments object exists
+            if (!receiptData.payments) {
+                receiptData.payments = {};
+            }
+            
+            // Populate form fields
+            if (receiptData.name) document.getElementById('receipt-name').value = receiptData.name;
+            if (receiptData.tax) document.getElementById('tax-amount').value = receiptData.tax;
+            if (receiptData.tip) document.getElementById('tip-amount').value = receiptData.tip;
+            
+            renderItems();
+        }
+    }
+}
+
+// Auto-save every few seconds
+setInterval(autoSave, 3000);
