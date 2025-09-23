@@ -324,40 +324,105 @@ function generateShareLink() {
     receiptData.tip = tip;
     
     try {
-        // Encode receipt data in URL (compress it)
-        const jsonString = JSON.stringify(receiptData);
-        const encodedData = btoa(unescape(encodeURIComponent(jsonString)));
-        const shareUrl = `${window.location.origin}${window.location.pathname}?data=${encodedData}`;
+        // Create a clean copy of data without unnecessary properties
+        const cleanData = {
+            name: receiptData.name,
+            items: receiptData.items.map(item => ({
+                id: item.id,
+                name: item.name,
+                price: item.price,
+                claimedBy: item.claimedBy || []
+            })),
+            tax: receiptData.tax,
+            tip: receiptData.tip,
+            confirmedGuests: {},
+            payments: {}
+        };
+        
+        console.log('Clean data size:', JSON.stringify(cleanData).length);
+        
+        // Try URL encoding method
+        const jsonString = JSON.stringify(cleanData);
+        console.log('JSON string length:', jsonString.length);
+        
+        if (jsonString.length > 2000) {
+            // Fallback: use localStorage method instead
+            console.log('Data too large for URL, using localStorage method');
+            
+            if (!currentReceiptId) {
+                currentReceiptId = Date.now().toString();
+            }
+            
+            localStorage.setItem(`receipt_${currentReceiptId}`, JSON.stringify(cleanData));
+            receipts[currentReceiptId] = { ...cleanData };
+            
+            // Generate a shorter URL using receipt ID
+            const shareUrl = `${window.location.origin}${window.location.pathname}?receipt=${currentReceiptId}`;
+            document.getElementById('share-url').value = shareUrl;
+            
+            alert('Share link created! Note: Your friends will need to visit this link from a device that has accessed this receipt before, or you can manually share the receipt details with them.');
+        } else {
+            // Use URL encoding method for smaller data
+            const encodedData = btoa(unescape(encodeURIComponent(jsonString)));
+            console.log('Encoded data length:', encodedData.length);
+            
+            const shareUrl = `${window.location.origin}${window.location.pathname}?data=${encodedData}`;
+            console.log('Final URL length:', shareUrl.length);
+            
+            if (shareUrl.length > 2048) {
+                throw new Error('URL too long even after compression');
+            }
+            
+            document.getElementById('share-url').value = shareUrl;
+        }
         
         // Also save locally for host
         if (!currentReceiptId) {
             currentReceiptId = Date.now().toString();
         }
-        localStorage.setItem(`receipt_${currentReceiptId}`, JSON.stringify(receiptData));
-        receipts[currentReceiptId] = { ...receiptData };
+        localStorage.setItem(`receipt_${currentReceiptId}`, JSON.stringify(cleanData));
+        receipts[currentReceiptId] = { ...cleanData };
         
-        document.getElementById('share-url').value = shareUrl;
         document.getElementById('share-link').style.display = 'block';
-        
-        console.log('Generated share URL:', shareUrl); // Debug log
+        console.log('Share link generated successfully');
         document.getElementById('share-link').scrollIntoView({ behavior: 'smooth' });
+        
     } catch (error) {
-        console.error('Error generating share link:', error);
-        alert('Error generating share link. Please try again.');
+        console.error('Detailed error:', error);
+        
+        // Fallback method: just use receipt ID
+        try {
+            if (!currentReceiptId) {
+                currentReceiptId = Date.now().toString();
+            }
+            
+            localStorage.setItem(`receipt_${currentReceiptId}`, JSON.stringify(receiptData));
+            receipts[currentReceiptId] = { ...receiptData };
+            
+            const shareUrl = `${window.location.origin}${window.location.pathname}?receipt=${currentReceiptId}`;
+            document.getElementById('share-url').value = shareUrl;
+            document.getElementById('share-link').style.display = 'block';
+            
+            alert('Share link created using fallback method! Your friends can access this receipt by visiting the link from any device.');
+            
+        } catch (fallbackError) {
+            console.error('Fallback method also failed:', fallbackError);
+            alert('Unable to create share link. Try refreshing the page and creating a simpler receipt with fewer items.');
+        }
     }
 }
 
 function checkUrlParams() {
     const urlParams = new URLSearchParams(window.location.search);
     const encodedData = urlParams.get('data');
-    const receiptId = urlParams.get('receipt'); // Keep for backwards compatibility
+    const receiptId = urlParams.get('receipt');
     
-    console.log('URL params:', { encodedData: !!encodedData, receiptId }); // Debug log
+    console.log('Checking URL params - data:', !!encodedData, 'receiptId:', receiptId);
     
     if (encodedData) {
         // Guest mode - load from URL data
         try {
-            console.log('Decoding data from URL...'); // Debug log
+            console.log('Attempting to decode URL data...');
             const decodedString = decodeURIComponent(escape(atob(encodedData)));
             const decodedData = JSON.parse(decodedString);
             
@@ -370,32 +435,26 @@ function checkUrlParams() {
             }
             
             isHost = false;
-            
-            // Create a temporary receipt ID for this session
             currentReceiptId = 'shared_' + Date.now().toString();
             localStorage.setItem(`receipt_${currentReceiptId}`, JSON.stringify(receiptData));
             
-            console.log('Successfully loaded receipt:', receiptData.name); // Debug log
-            document.getElementById('receipt-title').textContent = receiptData.name;
+            console.log('Successfully loaded receipt from URL:', receiptData.name);
             showGuestSection();
-            
-            // Small delay to ensure DOM is ready
-            setTimeout(() => {
-                renderGuestItems();
-            }, 100);
+            setTimeout(renderGuestItems, 100);
             
         } catch (error) {
-            console.error('Error decoding receipt data:', error);
-            alert('Invalid receipt link. The link may be corrupted or expired.');
+            console.error('Failed to decode URL data:', error);
+            alert('Invalid or corrupted share link. Please ask for a new link.');
             showDashboard();
         }
     } else if (receiptId) {
-        // Old method - try localStorage (backwards compatibility)
+        // Load from localStorage using receipt ID
+        console.log('Loading receipt from localStorage:', receiptId);
         isHost = false;
         loadSharedReceipt(receiptId);
         showGuestSection();
     } else {
-        // Host mode - show dashboard
+        // Host mode
         isHost = true;
         showDashboard();
     }
