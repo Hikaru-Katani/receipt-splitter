@@ -1,4 +1,6 @@
 // Global state
+let receipts = {}; // Store all receipts
+let currentReceiptId = null;
 let receiptData = {
     name: '',
     items: [],
@@ -14,8 +16,10 @@ let isHost = true;
 // Initialize app
 document.addEventListener('DOMContentLoaded', function() {
     checkUrlParams();
-    renderItems(); // Show empty state initially
-    setTimeout(loadDraft, 100); // Load draft after other init functions
+    loadAllReceipts();
+    if (isHost) {
+        renderReceiptDashboard();
+    }
 });
 
 function checkUrlParams() {
@@ -23,24 +27,126 @@ function checkUrlParams() {
     const receiptId = urlParams.get('receipt');
     
     if (receiptId) {
-        // Guest mode - people can only claim items
+        // Guest mode
         isHost = false;
         loadSharedReceipt(receiptId);
-        document.getElementById('host-section').style.display = 'none';
-        document.getElementById('guest-section').style.display = 'block';
+        showGuestSection();
+    } else {
+        // Host mode - show dashboard
+        showDashboard();
     }
 }
 
-// NEW: Function to start a new receipt
-function newReceipt() {
-    // Confirm if there's existing data
-    if (receiptData.items.length > 0 || receiptData.name) {
-        if (!confirm('This will clear your current receipt. Are you sure?')) {
-            return;
+function showDashboard() {
+    document.getElementById('receipt-dashboard').style.display = 'block';
+    document.getElementById('host-section').style.display = 'none';
+    document.getElementById('guest-section').style.display = 'none';
+    document.getElementById('summary-section').style.display = 'none';
+}
+
+function showHostSection() {
+    document.getElementById('receipt-dashboard').style.display = 'none';
+    document.getElementById('host-section').style.display = 'block';
+    document.getElementById('guest-section').style.display = 'none';
+    document.getElementById('summary-section').style.display = 'none';
+}
+
+function showGuestSection() {
+    document.getElementById('receipt-dashboard').style.display = 'none';
+    document.getElementById('host-section').style.display = 'none';
+    document.getElementById('guest-section').style.display = 'block';
+    document.getElementById('summary-section').style.display = 'none';
+}
+
+function showSummarySection() {
+    document.getElementById('receipt-dashboard').style.display = 'none';
+    document.getElementById('host-section').style.display = 'none';
+    document.getElementById('guest-section').style.display = 'none';
+    document.getElementById('summary-section').style.display = 'block';
+}
+
+// Load all receipts from localStorage
+function loadAllReceipts() {
+    receipts = {};
+    for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i);
+        if (key && key.startsWith('receipt_')) {
+            const receiptId = key.replace('receipt_', '');
+            const savedData = localStorage.getItem(key);
+            if (savedData) {
+                try {
+                    receipts[receiptId] = JSON.parse(savedData);
+                } catch (e) {
+                    console.error('Error loading receipt:', receiptId, e);
+                }
+            }
         }
     }
+}
+
+// Render the receipt dashboard
+function renderReceiptDashboard() {
+    const container = document.getElementById('receipts-list');
+    const receiptIds = Object.keys(receipts);
     
-    // Reset all data
+    if (receiptIds.length === 0) {
+        container.innerHTML = '<div class="empty-state">No receipts yet. Create your first receipt to get started!</div>';
+        return;
+    }
+    
+    container.innerHTML = '';
+    
+    receiptIds.forEach(receiptId => {
+        const receipt = receipts[receiptId];
+        const totalItems = receipt.items.length;
+        const totalValue = receipt.items.reduce((sum, item) => sum + item.price, 0) + receipt.tax + receipt.tip;
+        const people = {};
+        
+        receipt.items.forEach(item => {
+            if (item.claimedBy) {
+                item.claimedBy.forEach(person => {
+                    people[person] = true;
+                });
+            }
+        });
+        
+        const totalPeople = Object.keys(people).length;
+        const createdDate = new Date(parseInt(receiptId)).toLocaleDateString();
+        
+        const receiptCard = document.createElement('div');
+        receiptCard.className = 'receipt-card';
+        receiptCard.innerHTML = `
+            <div class="receipt-card-header">
+                <div class="receipt-card-title">${receipt.name || 'Untitled Receipt'}</div>
+                <div class="receipt-card-date">${createdDate}</div>
+            </div>
+            <div class="receipt-card-summary">
+                <div class="receipt-stat">
+                    <div class="receipt-stat-value">${totalItems}</div>
+                    <div class="receipt-stat-label">Items</div>
+                </div>
+                <div class="receipt-stat">
+                    <div class="receipt-stat-value">$${totalValue.toFixed(2)}</div>
+                    <div class="receipt-stat-label">Total</div>
+                </div>
+                <div class="receipt-stat">
+                    <div class="receipt-stat-value">${totalPeople}</div>
+                    <div class="receipt-stat-label">People</div>
+                </div>
+            </div>
+            <div class="receipt-actions">
+                <button onclick="editReceipt('${receiptId}')" class="edit-receipt-btn">Edit</button>
+                <button onclick="viewReceiptSummary('${receiptId}')" class="view-summary-btn">Summary</button>
+                <button onclick="deleteReceipt('${receiptId}')" class="delete-receipt-btn">Delete</button>
+            </div>
+        `;
+        container.appendChild(receiptCard);
+    });
+}
+
+// Create new receipt
+function createNewReceipt() {
+    currentReceiptId = Date.now().toString();
     receiptData = {
         name: '',
         items: [],
@@ -56,21 +162,83 @@ function newReceipt() {
     document.getElementById('tip-amount').value = '';
     document.getElementById('item-name').value = '';
     document.getElementById('item-price').value = '';
-    
-    // Hide share link section
     document.getElementById('share-link').style.display = 'none';
+    document.getElementById('share-url').value = '';
     
-    // Clear draft from localStorage
-    localStorage.removeItem('receipt_draft');
-    
-    // Re-render items (will show empty state)
+    showHostSection();
     renderItems();
-    
-    // Focus on receipt name field
     document.getElementById('receipt-name').focus();
+}
+
+// Edit existing receipt
+function editReceipt(receiptId) {
+    currentReceiptId = receiptId;
+    receiptData = { ...receipts[receiptId] };
     
-    // Show confirmation
-    alert('New receipt started! You can now enter items for a fresh receipt.');
+    // Populate form fields
+    document.getElementById('receipt-name').value = receiptData.name || '';
+    document.getElementById('tax-amount').value = receiptData.tax || '';
+    document.getElementById('tip-amount').value = receiptData.tip || '';
+    document.getElementById('item-name').value = '';
+    document.getElementById('item-price').value = '';
+    
+    // Check if this receipt has been shared
+    const shareUrl = `${window.location.origin}${window.location.pathname}?receipt=${receiptId}`;
+    document.getElementById('share-url').value = shareUrl;
+    document.getElementById('share-link').style.display = 'block';
+    
+    showHostSection();
+    renderItems();
+}
+
+// View receipt summary
+function viewReceiptSummary(receiptId) {
+    currentReceiptId = receiptId;
+    receiptData = { ...receipts[receiptId] };
+    
+    showSummarySection();
+    renderSummary();
+}
+
+// Delete receipt
+function deleteReceipt(receiptId) {
+    const receipt = receipts[receiptId];
+    if (confirm(`Delete "${receipt.name || 'Untitled Receipt'}"? This cannot be undone.`)) {
+        localStorage.removeItem(`receipt_${receiptId}`);
+        delete receipts[receiptId];
+        renderReceiptDashboard();
+    }
+}
+
+// Refresh receipt list
+function refreshReceiptList() {
+    loadAllReceipts();
+    renderReceiptDashboard();
+}
+
+// Update back buttons to go to dashboard
+function backToDashboard() {
+    // Save current receipt if it has data
+    if (currentReceiptId && (receiptData.items.length > 0 || receiptData.name)) {
+        saveCurrentReceipt();
+    }
+    
+    loadAllReceipts();
+    renderReceiptDashboard();
+    showDashboard();
+}
+
+// Save current receipt
+function saveCurrentReceipt() {
+    if (currentReceiptId) {
+        // Update receipt data with current form values
+        receiptData.name = document.getElementById('receipt-name').value.trim() || 'Untitled Receipt';
+        receiptData.tax = parseFloat(document.getElementById('tax-amount').value) || 0;
+        receiptData.tip = parseFloat(document.getElementById('tip-amount').value) || 0;
+        
+        localStorage.setItem(`receipt_${currentReceiptId}`, JSON.stringify(receiptData));
+        receipts[currentReceiptId] = { ...receiptData };
+    }
 }
 
 function addItem() {
@@ -94,8 +262,8 @@ function addItem() {
     document.getElementById('item-price').value = '';
     
     renderItems();
+    saveCurrentReceipt(); // Auto-save
     
-    // Auto-focus back to item name for quick entry
     document.getElementById('item-name').focus();
 }
 
@@ -128,6 +296,7 @@ function renderItems() {
 function deleteItem(id) {
     receiptData.items = receiptData.items.filter(item => item.id !== id);
     renderItems();
+    saveCurrentReceipt();
 }
 
 function generateShareLink() {
@@ -151,15 +320,18 @@ function generateShareLink() {
     receiptData.tax = tax;
     receiptData.tip = tip;
     
-    // Save to localStorage (in a real app, this would be sent to a server)
-    const receiptId = Date.now().toString();
-    localStorage.setItem(`receipt_${receiptId}`, JSON.stringify(receiptData));
+    // Save the current receipt
+    if (!currentReceiptId) {
+        currentReceiptId = Date.now().toString();
+    }
     
-    const shareUrl = `${window.location.origin}${window.location.pathname}?receipt=${receiptId}`;
+    localStorage.setItem(`receipt_${currentReceiptId}`, JSON.stringify(receiptData));
+    receipts[currentReceiptId] = { ...receiptData };
+    
+    const shareUrl = `${window.location.origin}${window.location.pathname}?receipt=${currentReceiptId}`;
     document.getElementById('share-url').value = shareUrl;
     document.getElementById('share-link').style.display = 'block';
     
-    // Scroll to share section
     document.getElementById('share-link').scrollIntoView({ behavior: 'smooth' });
 }
 
@@ -202,7 +374,6 @@ function setGuestName() {
     document.getElementById('guest-name').disabled = true;
     renderGuestItems();
     
-    // Scroll to items
     document.getElementById('guest-items-list').scrollIntoView({ behavior: 'smooth' });
 }
 
@@ -225,7 +396,6 @@ function renderGuestItems() {
             itemEl.classList.add('selected');
         }
         
-        // Show who else claimed this item
         const otherClaimers = item.claimedBy.filter(name => name !== currentGuest);
         const claimerText = otherClaimers.length > 0 ? ` (also claimed by: ${otherClaimers.join(', ')})` : '';
         
@@ -259,7 +429,6 @@ function toggleItemSelection(itemId) {
         item.claimedBy.push(currentGuest);
     }
     
-    // Save updated data
     const urlParams = new URLSearchParams(window.location.search);
     const receiptId = urlParams.get('receipt');
     localStorage.setItem(`receipt_${receiptId}`, JSON.stringify(receiptData));
@@ -305,90 +474,48 @@ function showSummary() {
         return;
     }
     
-    // Update receipt data with current values
     receiptData.name = document.getElementById('receipt-name').value.trim() || 'Untitled Receipt';
     receiptData.tax = parseFloat(document.getElementById('tax-amount').value) || 0;
     receiptData.tip = parseFloat(document.getElementById('tip-amount').value) || 0;
     
-    // Check if we need to sync with shared data
-    // Look for any existing receipt in localStorage that matches our current receipt
-    if (isHost) {
-        // Try to find existing shared receipt data
-        let foundReceiptId = null;
-        
-        // First check if share URL exists
-        const shareUrl = document.getElementById('share-url').value;
-        if (shareUrl) {
-            const urlParams = new URLSearchParams(shareUrl.split('?')[1]);
-            foundReceiptId = urlParams.get('receipt');
-        }
-        
-        // If no share URL, check localStorage for any receipt with matching items
-        if (!foundReceiptId) {
-            for (let i = 0; i < localStorage.length; i++) {
-                const key = localStorage.key(i);
-                if (key && key.startsWith('receipt_')) {
-                    const receiptId = key.replace('receipt_', '');
-                    const savedData = localStorage.getItem(key);
-                    if (savedData) {
-                        const savedReceiptData = JSON.parse(savedData);
-                        // Check if this saved receipt has the same items as our current receipt
-                        if (savedReceiptData.name === receiptData.name && 
-                            savedReceiptData.items.length === receiptData.items.length) {
-                            foundReceiptId = receiptId;
-                            break;
-                        }
-                    }
-                }
-            }
-        }
-        
-        // If we found a matching receipt, sync the data
-        if (foundReceiptId) {
-            const savedData = localStorage.getItem(`receipt_${foundReceiptId}`);
-            if (savedData) {
-                const sharedReceiptData = JSON.parse(savedData);
-                console.log('Syncing with shared receipt data:', sharedReceiptData);
-                
-                // Merge the guest selections with current host data
-                // Keep the current form values but update claims and payments
-                receiptData.items = sharedReceiptData.items.map(savedItem => {
-                    const currentItem = receiptData.items.find(item => item.name === savedItem.name && item.price === savedItem.price);
-                    if (currentItem) {
-                        return {
-                            ...currentItem,
-                            claimedBy: savedItem.claimedBy || []
-                        };
-                    }
-                    return savedItem;
-                });
-                receiptData.payments = sharedReceiptData.payments || {};
-            }
+    // Sync with saved data if receipt exists
+    if (currentReceiptId) {
+        const savedData = localStorage.getItem(`receipt_${currentReceiptId}`);
+        if (savedData) {
+            const sharedReceiptData = JSON.parse(savedData);
+            receiptData.items = sharedReceiptData.items;
+            receiptData.payments = sharedReceiptData.payments || {};
         }
     }
     
-    document.getElementById('host-section').style.display = 'none';
-    document.getElementById('summary-section').style.display = 'block';
-    
+    showSummarySection();
     renderSummary();
 }
 
 function renderSummary() {
-    // Sync with shared data before rendering
-    syncWithSharedData();
+    // Always sync with saved data
+    if (isHost && currentReceiptId) {
+        const savedData = localStorage.getItem(`receipt_${currentReceiptId}`);
+        if (savedData) {
+            const savedReceiptData = JSON.parse(savedData);
+            receiptData.items = savedReceiptData.items;
+            receiptData.payments = savedReceiptData.payments || {};
+        }
+    }
     
     const summaryContainer = document.getElementById('summary-content');
     const people = {};
     
-    // Calculate each person's share
     receiptData.items.forEach(item => {
-        item.claimedBy.forEach(person => {
-            if (!people[person]) {
-                people[person] = { items: [], subtotal: 0 };
-            }
-            people[person].items.push(item);
-            people[person].subtotal += item.price;
-        });
+        if (item.claimedBy && Array.isArray(item.claimedBy)) {
+            item.claimedBy.forEach(person => {
+                if (!people[person]) {
+                    people[person] = { items: [], subtotal: 0 };
+                }
+                people[person].items.push(item);
+                people[person].subtotal += item.price;
+            });
+        }
     });
     
     const totalItemsValue = receiptData.items.reduce((sum, item) => sum + item.price, 0);
@@ -414,7 +541,6 @@ function renderSummary() {
         let totalOwed = 0;
         const owingDetails = [];
         
-        // Show each person's breakdown with payment status
         peopleWithClaims.forEach(person => {
             const personData = people[person];
             const myProportion = totalItemsValue > 0 ? personData.subtotal / totalItemsValue : 0;
@@ -471,7 +597,6 @@ function renderSummary() {
             `;
         });
         
-        // Rest of the summary continues as before...
         const remainingBalance = totalOwed - totalPaid;
         summaryHtml += `
             <div class="summary-card payment-summary">
@@ -502,12 +627,13 @@ function renderSummary() {
             `;
             
             owingDetails.forEach(({ person, amount }) => {
+                const personTotalBill = people[person].subtotal + (receiptData.tax + receiptData.tip) * (people[person].subtotal / totalItemsValue);
                 summaryHtml += `
                     <li style="padding: 8px 0; border-bottom: 1px solid #e2e8f0; display: flex; justify-content: space-between; align-items: center;">
                         <span style="font-weight: 600; color: #2d3748;">${person}</span>
                         <div style="display: flex; align-items: center; gap: 10px;">
                             <span style="color: #e53e3e; font-weight: 700; font-size: 1.1rem;">$${amount.toFixed(2)}</span>
-                            <button onclick="markAsPaid('${person}', ${(receiptData.items.filter(item => item.claimedBy.includes(person)).reduce((sum, item) => sum + item.price, 0) + (receiptData.tax + receiptData.tip) * (receiptData.items.filter(item => item.claimedBy.includes(person)).reduce((sum, item) => sum + item.price, 0) / totalItemsValue)).toFixed(2)})" 
+                            <button onclick="markAsPaid('${person}', ${personTotalBill.toFixed(2)})" 
                                     class="quick-paid-btn" style="font-size: 0.8rem; padding: 4px 8px;">
                                 ✓ Paid
                             </button>
@@ -546,9 +672,8 @@ function renderSummary() {
         `;
     }
     
-    // Unclaimed items section stays the same...
     const unclaimedItems = receiptData.items.filter(item => 
-        item.claimedBy.length === 0
+        !item.claimedBy || item.claimedBy.length === 0
     );
     
     if (unclaimedItems.length > 0) {
@@ -574,44 +699,45 @@ function updatePayment(person, amount) {
     const paymentAmount = parseFloat(amount) || 0;
     receiptData.payments[person] = paymentAmount;
     
-    // Save to localStorage
-    const urlParams = new URLSearchParams(window.location.search);
-    const receiptId = urlParams.get('receipt');
-    
-    if (receiptId) {
-        localStorage.setItem(`receipt_${receiptId}`, JSON.stringify(receiptData));
-    } else {
-        // Save draft
-        localStorage.setItem('receipt_draft', JSON.stringify(receiptData));
+    if (currentReceiptId) {
+        localStorage.setItem(`receipt_${currentReceiptId}`, JSON.stringify(receiptData));
     }
     
-    // Re-render summary to update colors and status
     renderSummary();
 }
 
+function markAsPaid(person, totalAmount) {
+    if (confirm(`Mark ${person} as fully paid ($${totalAmount})?`)) {
+        receiptData.payments[person] = parseFloat(totalAmount);
+        
+        if (currentReceiptId) {
+            localStorage.setItem(`receipt_${currentReceiptId}`, JSON.stringify(receiptData));
+        }
+        
+        renderSummary();
+        
+        const button = event.target;
+        const originalText = button.textContent;
+        button.textContent = '✓ Marked Paid';
+        button.style.background = '#38a169';
+        button.disabled = true;
+        
+        setTimeout(() => {
+            renderSummary();
+        }, 1500);
+    }
+}
+
 function refreshSummary() {
-    // Reload data from localStorage if we're viewing a shared receipt
-    const urlParams = new URLSearchParams(window.location.search);
-    const receiptId = urlParams.get('receipt');
-    
-    if (receiptId) {
-        const savedData = localStorage.getItem(`receipt_${receiptId}`);
+    if (currentReceiptId) {
+        const savedData = localStorage.getItem(`receipt_${currentReceiptId}`);
         if (savedData) {
-            const updatedData = JSON.parse(savedData);
-            // Merge the updated data while preserving current form values if we're the host
-            if (isHost) {
-                receiptData.items = updatedData.items; // Get updated claims
-                receiptData.payments = updatedData.payments; // Get updated payments
-                // Keep current form values for tax/tip/name
-            } else {
-                receiptData = updatedData;
-            }
+            receiptData = JSON.parse(savedData);
         }
     }
     
     renderSummary();
     
-    // Show feedback
     const button = event.target;
     const originalText = button.textContent;
     button.textContent = '✓ Updated';
@@ -622,22 +748,19 @@ function refreshSummary() {
 }
 
 function backToHost() {
-    document.getElementById('summary-section').style.display = 'none';
-    document.getElementById('host-section').style.display = 'block';
+    showHostSection();
 }
 
-// Allow Enter key to add items quickly
+// Keyboard shortcuts
 document.addEventListener('keydown', function(event) {
     if (event.key === 'Enter') {
         const activeElement = document.activeElement;
         
-        // If in item name or price field, add the item
         if (activeElement && (activeElement.id === 'item-name' || activeElement.id === 'item-price')) {
             event.preventDefault();
             addItem();
         }
         
-        // If in guest name field, set the name
         if (activeElement && activeElement.id === 'guest-name') {
             event.preventDefault();
             setGuestName();
@@ -645,9 +768,9 @@ document.addEventListener('keydown', function(event) {
     }
 });
 
-// Auto-save functionality for host
+// Auto-save functionality
 function autoSave() {
-    if (isHost && receiptData.items.length > 0) {
+    if (isHost && currentReceiptId && receiptData.items.length > 0) {
         const receiptName = document.getElementById('receipt-name').value.trim();
         const tax = parseFloat(document.getElementById('tax-amount').value) || 0;
         const tip = parseFloat(document.getElementById('tip-amount').value) || 0;
@@ -656,100 +779,213 @@ function autoSave() {
         receiptData.tax = tax;
         receiptData.tip = tip;
         
-        // Save to localStorage with a draft key
-        localStorage.setItem('receipt_draft', JSON.stringify(receiptData));
+        localStorage.setItem(`receipt_${currentReceiptId}`, JSON.stringify(receiptData));
     }
 }
 
-// Load draft on page load
+setInterval(autoSave, 3000);
+
+// Load draft functionality (for new receipts)
 function loadDraft() {
-    if (isHost) {
+    if (isHost && !currentReceiptId) {
         const draftData = localStorage.getItem('receipt_draft');
         if (draftData) {
-            receiptData = JSON.parse(draftData);
-            
-            // Populate form fields
-            if (receiptData.name) document.getElementById('receipt-name').value = receiptData.name;
-            if (receiptData.tax) document.getElementById('tax-amount').value = receiptData.tax;
-            if (receiptData.tip) document.getElementById('tip-amount').value = receiptData.tip;
-            
-            renderItems();
-        }
-    }
-}
-
-// NEW: Function to edit receipt items
-function editReceipt() {
-    // Ask for confirmation since this might affect shared links
-    const hasSharedLink = document.getElementById('share-link').style.display !== 'none';
-    if (hasSharedLink) {
-        if (!confirm('This receipt has been shared with others. Editing items might affect their selections. Continue?')) {
-            return;
-        }
-    }
-    
-    document.getElementById('summary-section').style.display = 'none';
-    document.getElementById('host-section').style.display = 'block';
-    
-    // Focus on add item field for quick editing
-    document.getElementById('item-name').focus();
-}
-
-function syncWithSharedData() {
-    if (!isHost) return;
-    
-    // This function is now only called from renderSummary() and refreshSummary()
-    // The main sync logic is in showSummary() above
-    
-    const shareUrl = document.getElementById('share-url').value;
-    if (shareUrl) {
-        const urlParams = new URLSearchParams(shareUrl.split('?')[1]);
-        const receiptId = urlParams.get('receipt');
-        
-        if (receiptId) {
-            const savedData = localStorage.getItem(`receipt_${receiptId}`);
-            if (savedData) {
-                const sharedReceiptData = JSON.parse(savedData);
-                receiptData.items = sharedReceiptData.items;
-                receiptData.payments = sharedReceiptData.payments || {};
+            try {
+                const draft = JSON.parse(draftData);
+                receiptData = draft;
+                
+                // Populate form fields
+                if (receiptData.name) document.getElementById('receipt-name').value = receiptData.name;
+                if (receiptData.tax) document.getElementById('tax-amount').value = receiptData.tax;
+                if (receiptData.tip) document.getElementById('tip-amount').value = receiptData.tip;
+                
+                renderItems();
+            } catch (e) {
+                console.error('Error loading draft:', e);
             }
         }
     }
 }
 
-// NEW: Function to mark someone as fully paid
-function markAsPaid(person, totalAmount) {
-    if (confirm(`Mark ${person} as fully paid ($${totalAmount})?`)) {
-        receiptData.payments[person] = parseFloat(totalAmount);
+// Remove the old newReceipt function since we now have createNewReceipt
+// This function is kept for backwards compatibility if called from HTML
+function newReceipt() {
+    createNewReceipt();
+}
+
+// Edit receipt function (alternative to editReceipt for backwards compatibility)
+function editReceipt(receiptId) {
+    currentReceiptId = receiptId;
+    receiptData = { ...receipts[receiptId] };
+    
+    // Populate form fields
+    document.getElementById('receipt-name').value = receiptData.name || '';
+    document.getElementById('tax-amount').value = receiptData.tax || '';
+    document.getElementById('tip-amount').value = receiptData.tip || '';
+    document.getElementById('item-name').value = '';
+    document.getElementById('item-price').value = '';
+    
+    // Set up share link if this receipt has items
+    if (receiptData.items.length > 0) {
+        const shareUrl = `${window.location.origin}${window.location.pathname}?receipt=${receiptId}`;
+        document.getElementById('share-url').value = shareUrl;
+        document.getElementById('share-link').style.display = 'block';
+    } else {
+        document.getElementById('share-link').style.display = 'none';
+        document.getElementById('share-url').value = '';
+    }
+    
+    showHostSection();
+    renderItems();
+}
+
+// Helper function to calculate person's total bill
+function calculatePersonTotal(person, people, totalItemsValue) {
+    const personData = people[person];
+    if (!personData) return 0;
+    
+    const myProportion = totalItemsValue > 0 ? personData.subtotal / totalItemsValue : 0;
+    const myTax = receiptData.tax * myProportion;
+    const myTip = receiptData.tip * myProportion;
+    return personData.subtotal + myTax + myTip;
+}
+
+// Utility function to format currency
+function formatCurrency(amount) {
+    return `$${amount.toFixed(2)}`;
+}
+
+// Function to export receipt data (bonus feature)
+function exportReceiptData(receiptId) {
+    const receipt = receipts[receiptId];
+    if (receipt) {
+        const dataStr = JSON.stringify(receipt, null, 2);
+        const dataBlob = new Blob([dataStr], { type: 'application/json' });
+        const url = URL.createObjectURL(dataBlob);
         
-        // Save to localStorage
-        const shareUrl = document.getElementById('share-url').value;
-        if (shareUrl) {
-            const urlParams = new URLSearchParams(shareUrl.split('?')[1]);
-            const receiptId = urlParams.get('receipt');
-            if (receiptId) {
-                localStorage.setItem(`receipt_${receiptId}`, JSON.stringify(receiptData));
-            }
-        }
-        
-        // Save draft too
-        localStorage.setItem('receipt_draft', JSON.stringify(receiptData));
-        
-        // Re-render summary
-        renderSummary();
-        
-        // Show success message briefly
-        const button = event.target;
-        const originalText = button.textContent;
-        button.textContent = '✓ Marked Paid';
-        button.style.background = '#38a169';
-        button.disabled = true;
-        
-        setTimeout(() => {
-            renderSummary(); // This will remove the button since they're now paid
-        }, 1500);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = `receipt-${receipt.name || 'untitled'}-${new Date(parseInt(receiptId)).toISOString().split('T')[0]}.json`;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        URL.revokeObjectURL(url);
     }
 }
 
-// Auto-save every few seconds
-setInterval(autoSave, 3000);
+// Function to import receipt data (bonus feature)
+function importReceiptData(event) {
+    const file = event.target.files[0];
+    if (file && file.type === 'application/json') {
+        const reader = new FileReader();
+        reader.onload = function(e) {
+            try {
+                const importedReceipt = JSON.parse(e.target.result);
+                const newReceiptId = Date.now().toString();
+                
+                // Validate the imported data structure
+                if (importedReceipt.name !== undefined && Array.isArray(importedReceipt.items)) {
+                    localStorage.setItem(`receipt_${newReceiptId}`, JSON.stringify(importedReceipt));
+                    loadAllReceipts();
+                    renderReceiptDashboard();
+                    alert(`Receipt "${importedReceipt.name}" imported successfully!`);
+                } else {
+                    alert('Invalid receipt file format.');
+                }
+            } catch (error) {
+                alert('Error importing receipt file.');
+                console.error('Import error:', error);
+            }
+        };
+        reader.readAsText(file);
+    }
+}
+
+// Clean up old localStorage entries (maintenance function)
+function cleanupOldReceipts() {
+    const oneMonthAgo = Date.now() - (30 * 24 * 60 * 60 * 1000); // 30 days
+    let cleanedCount = 0;
+    
+    for (let i = localStorage.length - 1; i >= 0; i--) {
+        const key = localStorage.key(i);
+        if (key && key.startsWith('receipt_')) {
+            const receiptId = key.replace('receipt_', '');
+            const timestamp = parseInt(receiptId);
+            
+            if (timestamp < oneMonthAgo) {
+                localStorage.removeItem(key);
+                cleanedCount++;
+            }
+        }
+    }
+    
+    if (cleanedCount > 0) {
+        console.log(`Cleaned up ${cleanedCount} old receipts`);
+        loadAllReceipts();
+        renderReceiptDashboard();
+    }
+}
+
+// Debug function to view all localStorage data
+function debugLocalStorage() {
+    console.log('=== Receipt Splitter Debug Info ===');
+    console.log('Current receipts in memory:', receipts);
+    console.log('Current receipt data:', receiptData);
+    console.log('Current receipt ID:', currentReceiptId);
+    console.log('Is host:', isHost);
+    console.log('Current guest:', currentGuest);
+    
+    console.log('\n=== LocalStorage Contents ===');
+    for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i);
+        if (key && key.startsWith('receipt_')) {
+            const data = JSON.parse(localStorage.getItem(key));
+            console.log(`${key}:`, data);
+        }
+    }
+}
+
+// Error handling wrapper for localStorage operations
+function safeLocalStorageOperation(operation, key, data = null) {
+    try {
+        switch (operation) {
+            case 'get':
+                return localStorage.getItem(key);
+            case 'set':
+                localStorage.setItem(key, data);
+                return true;
+            case 'remove':
+                localStorage.removeItem(key);
+                return true;
+            default:
+                throw new Error('Invalid operation');
+        }
+    } catch (error) {
+        console.error('LocalStorage operation failed:', error);
+        if (error.name === 'QuotaExceededError') {
+            alert('Storage quota exceeded. Please delete some old receipts.');
+        }
+        return null;
+    }
+}
+
+// Initialize the app with error handling
+function initializeApp() {
+    try {
+        checkUrlParams();
+        loadAllReceipts();
+        if (isHost) {
+            renderReceiptDashboard();
+        }
+    } catch (error) {
+        console.error('App initialization failed:', error);
+        alert('There was an error loading the app. Please refresh the page.');
+    }
+}
+
+// Replace the DOMContentLoaded event listener with the safer version
+document.addEventListener('DOMContentLoaded', initializeApp);
+
+// Cleanup function that can be called periodically
+// Uncomment the next line if you want automatic cleanup (runs once per session)
+// setTimeout(cleanupOldReceipts, 5000);
