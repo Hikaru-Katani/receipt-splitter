@@ -302,7 +302,8 @@ function deleteItem(id) {
     saveCurrentReceipt();
 }
 
-function generateShareLink() {
+// Updated generateShareLink with Firebase
+async function generateShareLink() {
     const receiptName = document.getElementById('receipt-name').value.trim();
     const tax = parseFloat(document.getElementById('tax-amount').value) || 0;
     const tip = parseFloat(document.getElementById('tip-amount').value) || 0;
@@ -324,44 +325,44 @@ function generateShareLink() {
     receiptData.tip = tip;
     
     try {
-        // Encode receipt data in URL (compress it)
-        const jsonString = JSON.stringify(receiptData);
-        const encodedData = btoa(unescape(encodeURIComponent(jsonString)));
-        const shareUrl = `${window.location.origin}${window.location.pathname}?data=${encodedData}`;
+        // Save to Firebase
+        const receiptRef = database.ref('receipts').push();
+        await receiptRef.set(receiptData);
         
-        // Also save locally for host
-        if (!currentReceiptId) {
-            currentReceiptId = Date.now().toString();
-        }
+        currentReceiptId = receiptRef.key;
+        
+        // Also save locally
         localStorage.setItem(`receipt_${currentReceiptId}`, JSON.stringify(receiptData));
         receipts[currentReceiptId] = { ...receiptData };
         
+        const shareUrl = `${window.location.origin}${window.location.pathname}?receipt=${currentReceiptId}`;
         document.getElementById('share-url').value = shareUrl;
         document.getElementById('share-link').style.display = 'block';
         
-        console.log('Generated share URL:', shareUrl); // Debug log
+        console.log('Receipt saved to Firebase:', currentReceiptId);
         document.getElementById('share-link').scrollIntoView({ behavior: 'smooth' });
+        
     } catch (error) {
-        console.error('Error generating share link:', error);
-        alert('Error generating share link. Please try again.');
+        console.error('Error saving to Firebase:', error);
+        alert('Error creating share link. Please check your internet connection.');
     }
 }
 
-function checkUrlParams() {
-    const urlParams = new URLSearchParams(window.location.search);
-    const encodedData = urlParams.get('data');
-    const receiptId = urlParams.get('receipt'); // Keep for backwards compatibility
+// Updated loadSharedReceipt with Firebase sync
+function loadSharedReceipt(receiptId) {
+    console.log('Loading shared receipt:', receiptId);
+    currentReceiptId = receiptId;
     
-    console.log('URL params:', { encodedData: !!encodedData, receiptId }); // Debug log
+    const receiptRef = database.ref(`receipts/${receiptId}`);
     
-    if (encodedData) {
-        // Guest mode - load from URL data
-        try {
-            console.log('Decoding data from URL...'); // Debug log
-            const decodedString = decodeURIComponent(escape(atob(encodedData)));
-            const decodedData = JSON.parse(decodedString);
+    // Listen for real-time updates
+    receiptRef.on('value', (snapshot) => {
+        const data = snapshot.val();
+        if (data) {
+            console.log('Received updated data from Firebase');
+            receiptData = data;
             
-            receiptData = decodedData;
+            // Ensure required properties exist
             if (!receiptData.confirmedGuests) {
                 receiptData.confirmedGuests = {};
             }
@@ -369,39 +370,25 @@ function checkUrlParams() {
                 receiptData.payments = {};
             }
             
-            isHost = false;
+            // Cache locally
+            localStorage.setItem(`receipt_${receiptId}`, JSON.stringify(receiptData));
             
-            // Create a temporary receipt ID for this session
-            currentReceiptId = 'shared_' + Date.now().toString();
-            localStorage.setItem(`receipt_${currentReceiptId}`, JSON.stringify(receiptData));
-            
-            console.log('Successfully loaded receipt:', receiptData.name); // Debug log
+            // Update UI
             document.getElementById('receipt-title').textContent = receiptData.name;
-            showGuestSection();
-            
-            // Small delay to ensure DOM is ready
-            setTimeout(() => {
+            if (!isHost) {
                 renderGuestItems();
-            }, 100);
-            
-        } catch (error) {
-            console.error('Error decoding receipt data:', error);
-            alert('Invalid receipt link. The link may be corrupted or expired.');
-            showDashboard();
+            }
+        } else {
+            console.error('Receipt not found in Firebase');
+            alert('Receipt not found! Please check your link.');
         }
-    } else if (receiptId) {
-        // Old method - try localStorage (backwards compatibility)
-        isHost = false;
-        loadSharedReceipt(receiptId);
-        showGuestSection();
-    } else {
-        // Host mode - show dashboard
-        isHost = true;
-        showDashboard();
-    }
+    }, (error) => {
+        console.error('Firebase error:', error);
+        alert('Error loading receipt. Please check your internet connection.');
+    });
 }
 
-// Update the toggleItemSelection function to save back to URL-based storage
+// Updated toggleItemSelection with Firebase sync
 function toggleItemSelection(itemId) {
     if (!currentGuest) {
         alert('Please set your name first');
@@ -423,13 +410,22 @@ function toggleItemSelection(itemId) {
         delete receiptData.confirmedGuests[currentGuest];
     }
     
-    // Save to localStorage for this session
-    localStorage.setItem(`receipt_${currentReceiptId}`, JSON.stringify(receiptData));
+    // Save to Firebase (real-time sync)
+    if (currentReceiptId) {
+        database.ref(`receipts/${currentReceiptId}`).set(receiptData)
+            .then(() => {
+                console.log('Item selection synced to Firebase');
+            })
+            .catch((error) => {
+                console.error('Error syncing to Firebase:', error);
+                alert('Error syncing changes. Please check your connection.');
+            });
+    }
     
     renderGuestItems();
 }
 
-// Update confirmSelectionWithHost to work with URL-based sharing
+// Updated confirmSelectionWithHost with Firebase sync
 function confirmSelectionWithHost() {
     if (!currentGuest) {
         alert('Please set your name first');
@@ -456,15 +452,258 @@ function confirmSelectionWithHost() {
         total: myItems.reduce((sum, item) => sum + item.price, 0)
     };
     
-    // Save to localStorage for this session
-    localStorage.setItem(`receipt_${currentReceiptId}`, JSON.stringify(receiptData));
-    
-    // Update the display
-    updateGuestTotal();
-    
-    // Show success feedback with instructions
-    alert(`Your selection has been confirmed!\n\nIMPORTANT: Your selections are saved locally on this device. To sync with the host, you need to tell them to check their payment summary and refresh it to see your latest selections.`);
+    // Save to Firebase
+    if (currentReceiptId) {
+        database.ref(`receipts/${currentReceiptId}`).set(receiptData)
+            .then(() => {
+                console.log('Confirmation synced to Firebase');
+                updateGuestTotal();
+                alert('Your selection has been confirmed and synced with the host!');
+            })
+            .catch((error) => {
+                console.error('Error syncing confirmation:', error);
+                alert('Error confirming selection. Please try again.');
+            });
+    }
 }
+
+// Updated updatePayment with Firebase sync
+function updatePayment(person, amount) {
+    const paymentAmount = parseFloat(amount) || 0;
+    receiptData.payments[person] = paymentAmount;
+    
+    // Save to Firebase
+    if (currentReceiptId) {
+        database.ref(`receipts/${currentReceiptId}/payments`).set(receiptData.payments)
+            .then(() => {
+                console.log('Payment update synced to Firebase');
+            })
+            .catch((error) => {
+                console.error('Error syncing payment:', error);
+            });
+    }
+    
+    renderSummary();
+}
+
+// Updated markAsPaid with Firebase sync
+function markAsPaid(person, totalAmount) {
+    if (confirm(`Mark ${person} as fully paid ($${totalAmount})?`)) {
+        receiptData.payments[person] = parseFloat(totalAmount);
+        
+        // Save to Firebase
+        if (currentReceiptId) {
+            database.ref(`receipts/${currentReceiptId}/payments`).set(receiptData.payments)
+                .then(() => {
+                    console.log('Payment marked and synced to Firebase');
+                    renderSummary();
+                })
+                .catch((error) => {
+                    console.error('Error syncing payment:', error);
+                    alert('Error updating payment. Please try again.');
+                });
+        }
+        
+        const button = event.target;
+        const originalText = button.textContent;
+        button.textContent = 'Marked Paid';
+        button.style.background = '#38a169';
+        button.disabled = true;
+        
+        setTimeout(() => {
+            renderSummary();
+        }, 1500);
+    }
+}
+
+// Add real-time listener for host summary view
+function showSummary() {
+    if (receiptData.items.length === 0) {
+        alert('No items to summarize. Please add items first.');
+        return;
+    }
+    
+    receiptData.name = document.getElementById('receipt-name').value.trim() || 'Untitled Receipt';
+    receiptData.tax = parseFloat(document.getElementById('tax-amount').value) || 0;
+    receiptData.tip = parseFloat(document.getElementById('tip-amount').value) || 0;
+    
+    // Start listening for real-time updates
+    if (currentReceiptId) {
+        const receiptRef = database.ref(`receipts/${currentReceiptId}`);
+        receiptRef.on('value', (snapshot) => {
+            const data = snapshot.val();
+            if (data) {
+                // Merge updated data
+                receiptData.items = data.items || receiptData.items;
+                receiptData.payments = data.payments || {};
+                receiptData.confirmedGuests = data.confirmedGuests || {};
+                
+                renderSummary();
+            }
+        });
+    }
+    
+    showSummarySection();
+    renderSummary();
+}
+function generateShareLink() {
+    const receiptName = document.getElementById('receipt-name').value.trim();
+    const tax = parseFloat(document.getElementById('tax-amount').value) || 0;
+    const tip = parseFloat(document.getElementById('tip-amount').value) || 0;
+    
+    if (!receiptName) {
+        alert('Please enter a receipt name');
+        document.getElementById('receipt-name').focus();
+        return;
+    }
+    
+    if (receiptData.items.length === 0) {
+        alert('Please add at least one item from your receipt');
+        document.getElementById('item-name').focus();
+        return;
+    }
+    
+    receiptData.name = receiptName;
+    receiptData.tax = tax;
+    receiptData.tip = tip;
+    
+    try {
+        // Create a clean copy of data without unnecessary properties
+        const cleanData = {
+            name: receiptData.name,
+            items: receiptData.items.map(item => ({
+                id: item.id,
+                name: item.name,
+                price: item.price,
+                claimedBy: item.claimedBy || []
+            })),
+            tax: receiptData.tax,
+            tip: receiptData.tip,
+            confirmedGuests: {},
+            payments: {}
+        };
+        
+        console.log('Clean data size:', JSON.stringify(cleanData).length);
+        
+        // Try URL encoding method
+        const jsonString = JSON.stringify(cleanData);
+        console.log('JSON string length:', jsonString.length);
+        
+        if (jsonString.length > 2000) {
+            // Fallback: use localStorage method instead
+            console.log('Data too large for URL, using localStorage method');
+            
+            if (!currentReceiptId) {
+                currentReceiptId = Date.now().toString();
+            }
+            
+            localStorage.setItem(`receipt_${currentReceiptId}`, JSON.stringify(cleanData));
+            receipts[currentReceiptId] = { ...cleanData };
+            
+            // Generate a shorter URL using receipt ID
+            const shareUrl = `${window.location.origin}${window.location.pathname}?receipt=${currentReceiptId}`;
+            document.getElementById('share-url').value = shareUrl;
+            
+            alert('Share link created! Note: Your friends will need to visit this link from a device that has accessed this receipt before, or you can manually share the receipt details with them.');
+        } else {
+            // Use URL encoding method for smaller data
+            const encodedData = btoa(unescape(encodeURIComponent(jsonString)));
+            console.log('Encoded data length:', encodedData.length);
+            
+            const shareUrl = `${window.location.origin}${window.location.pathname}?data=${encodedData}`;
+            console.log('Final URL length:', shareUrl.length);
+            
+            if (shareUrl.length > 2048) {
+                throw new Error('URL too long even after compression');
+            }
+            
+            document.getElementById('share-url').value = shareUrl;
+        }
+        
+        // Also save locally for host
+        if (!currentReceiptId) {
+            currentReceiptId = Date.now().toString();
+        }
+        localStorage.setItem(`receipt_${currentReceiptId}`, JSON.stringify(cleanData));
+        receipts[currentReceiptId] = { ...cleanData };
+        
+        document.getElementById('share-link').style.display = 'block';
+        console.log('Share link generated successfully');
+        document.getElementById('share-link').scrollIntoView({ behavior: 'smooth' });
+        
+    } catch (error) {
+        console.error('Detailed error:', error);
+        
+        // Fallback method: just use receipt ID
+        try {
+            if (!currentReceiptId) {
+                currentReceiptId = Date.now().toString();
+            }
+            
+            localStorage.setItem(`receipt_${currentReceiptId}`, JSON.stringify(receiptData));
+            receipts[currentReceiptId] = { ...receiptData };
+            
+            const shareUrl = `${window.location.origin}${window.location.pathname}?receipt=${currentReceiptId}`;
+            document.getElementById('share-url').value = shareUrl;
+            document.getElementById('share-link').style.display = 'block';
+            
+            alert('Share link created using fallback method! Your friends can access this receipt by visiting the link from any device.');
+            
+        } catch (fallbackError) {
+            console.error('Fallback method also failed:', fallbackError);
+            alert('Unable to create share link. Try refreshing the page and creating a simpler receipt with fewer items.');
+        }
+    }
+}
+
+function checkUrlParams() {
+    const urlParams = new URLSearchParams(window.location.search);
+    const encodedData = urlParams.get('data');
+    const receiptId = urlParams.get('receipt');
+    
+    console.log('Checking URL params - data:', !!encodedData, 'receiptId:', receiptId);
+    
+    if (encodedData) {
+        // Guest mode - load from URL data
+        try {
+            console.log('Attempting to decode URL data...');
+            const decodedString = decodeURIComponent(escape(atob(encodedData)));
+            const decodedData = JSON.parse(decodedString);
+            
+            receiptData = decodedData;
+            if (!receiptData.confirmedGuests) {
+                receiptData.confirmedGuests = {};
+            }
+            if (!receiptData.payments) {
+                receiptData.payments = {};
+            }
+            
+            isHost = false;
+            currentReceiptId = 'shared_' + Date.now().toString();
+            localStorage.setItem(`receipt_${currentReceiptId}`, JSON.stringify(receiptData));
+            
+            console.log('Successfully loaded receipt from URL:', receiptData.name);
+            showGuestSection();
+            setTimeout(renderGuestItems, 100);
+            
+        } catch (error) {
+            console.error('Failed to decode URL data:', error);
+            alert('Invalid or corrupted share link. Please ask for a new link.');
+            showDashboard();
+        }
+    } else if (receiptId) {
+        // Load from localStorage using receipt ID
+        console.log('Loading receipt from localStorage:', receiptId);
+        isHost = false;
+        loadSharedReceipt(receiptId);
+        showGuestSection();
+    } else {
+        // Host mode
+        isHost = true;
+        showDashboard();
+    }
+}
+
 
 function copyLink() {
     const shareUrl = document.getElementById('share-url');
@@ -482,23 +721,6 @@ function copyLink() {
         button.textContent = originalText;
         button.style.background = '';
     }, 2000);
-}
-
-function loadSharedReceipt(receiptId) {
-    const savedData = localStorage.getItem(`receipt_${receiptId}`);
-    if (savedData) {
-        receiptData = JSON.parse(savedData);
-        
-        // Ensure confirmedGuests exists
-        if (!receiptData.confirmedGuests) {
-            receiptData.confirmedGuests = {};
-        }
-        
-        document.getElementById('receipt-title').textContent = receiptData.name;
-        renderGuestItems();
-    } else {
-        alert('Receipt not found! Please check your link.');
-    }
 }
 
 function setGuestName() {
@@ -669,6 +891,7 @@ function renderSummary() {
         if (savedData) {
             const savedReceiptData = JSON.parse(savedData);
             receiptData.items = savedReceiptData.items;
+            receiptData.payments = savedReceiptData.payments || {};
             receiptData.confirmedGuests = savedReceiptData.confirmedGuests || {};
         }
     }
@@ -704,20 +927,12 @@ function renderSummary() {
     `;
     
     const peopleWithClaims = Object.keys(people);
+    const hasPeopleClaims = peopleWithClaims.length > 0;
     
-    if (peopleWithClaims.length > 0) {
-        summaryHtml += `
-            <table class="summary-table">
-                <thead>
-                    <tr>
-                        <th>Name</th>
-                        <th>Items</th>
-                        <th>Breakdown</th>
-                        <th>Total Bill</th>
-                    </tr>
-                </thead>
-                <tbody>
-        `;
+    if (hasPeopleClaims) {
+        let totalPaid = 0;
+        let totalOwed = 0;
+        const owingDetails = [];
         
         peopleWithClaims.forEach(person => {
             const personData = people[person];
@@ -725,33 +940,156 @@ function renderSummary() {
             const myTax = receiptData.tax * myProportion;
             const myTip = receiptData.tip * myProportion;
             const total = personData.subtotal + myTax + myTip;
+            const paid = receiptData.payments[person] || 0;
+            const balance = total - paid;
+            
+            totalOwed += total;
+            totalPaid += paid;
+            
+            if (balance > 0.01) {
+                owingDetails.push({ person, amount: balance });
+            }
+            
+            const paymentStatus = balance <= 0.01 ? 'paid' : balance < total ? 'partial' : 'unpaid';
+            const statusIcon = balance <= 0.01 ? '✅' : balance < total ? '🟡' : '❌';
+            const statusColor = balance <= 0.01 ? '#38a169' : balance < total ? '#d69e2e' : '#e53e3e';
             
             summaryHtml += `
-                <tr>
-                    <td>
-                        <div class="person-name">${person}</div>
-                    </td>
-                    <td>
-                        <div class="items-list">${personData.items.map(item => item.name).join(', ')}</div>
-                    </td>
-                    <td>
-                        <div class="breakdown-details">
-                            Items: $${personData.subtotal.toFixed(2)}<br>
-                            Tax: $${myTax.toFixed(2)}<br>
-                            Tip: $${myTip.toFixed(2)}
+                <div class="summary-card ${paymentStatus}">
+                    <div class="summary-name">
+                        ${statusIcon} ${person}
+                        <span class="payment-status" style="color: ${statusColor}; font-size: 0.9rem; font-weight: normal;">
+                            ${balance <= 0.01 ? 'PAID' : balance < total ? 'PARTIAL' : 'UNPAID'}
+                        </span>
+                    </div>
+                    <div class="summary-items">
+                        <strong>Items:</strong> ${personData.items.map(item => item.name).join(', ')}<br>
+                        <strong>Breakdown:</strong> $${personData.subtotal.toFixed(2)} (items) + $${myTax.toFixed(2)} (tax) + $${myTip.toFixed(2)} (tip)
+                    </div>
+                    <div class="payment-tracking">
+                        <div class="amount-owed">Total Bill: $${total.toFixed(2)}</div>
+                        <div class="payment-controls">
+                            <div class="payment-input">
+                                <label>Amount Paid:</label>
+                                <input type="number" step="0.01" value="${paid.toFixed(2)}" 
+                                       onchange="updatePayment('${person}', this.value)"
+                                       class="payment-amount">
+                            </div>
+                            ${balance > 0.01 ? `
+                                <button onclick="markAsPaid('${person}', ${total.toFixed(2)})" 
+                                        class="mark-paid-btn">
+                                    ✓ Mark as Paid
+                                </button>
+                            ` : ''}
                         </div>
-                    </td>
-                    <td>
-                        <div class="total-amount">$${total.toFixed(2)}</div>
-                    </td>
-                </tr>
+                        <div class="balance" style="color: ${statusColor}; font-weight: bold;">
+                            ${balance <= 0.01 ? 'Fully Paid' : `Still Owes: $${balance.toFixed(2)}`}
+                        </div>
+                    </div>
+                </div>
             `;
         });
         
+        const remainingBalance = totalOwed - totalPaid;
         summaryHtml += `
-                </tbody>
-            </table>
+            <div class="summary-card payment-summary">
+                <div class="summary-name">💰 Payment Summary</div>
+                <div class="payment-totals">
+                    <div class="total-row">
+                        <span>Total Owed:</span>
+                        <span class="amount">$${totalOwed.toFixed(2)}</span>
+                    </div>
+                    <div class="total-row">
+                        <span>Total Paid:</span>
+                        <span class="amount paid">$${totalPaid.toFixed(2)}</span>
+                    </div>
+                    <div class="total-row balance-row">
+                        <span>Remaining Balance:</span>
+                        <span class="amount ${remainingBalance <= 0.01 ? 'paid' : 'unpaid'}">
+                            $${remainingBalance.toFixed(2)}
+                        </span>
+                    </div>
+                </div>
         `;
+        
+        if (owingDetails.length > 0) {
+            summaryHtml += `
+                <div class="who-owes-section">
+                    <h4 style="margin: 20px 0 10px 0; color: #2d3748; font-size: 1.1rem;">📋 Who Still Owes Money:</h4>
+                    <ul style="margin: 0; padding: 0; list-style: none; background: #f7fafc; border-radius: 8px; padding: 15px;">
+            `;
+            
+            owingDetails.forEach(({ person, amount }) => {
+                const personTotalBill = people[person].subtotal + (receiptData.tax + receiptData.tip) * (people[person].subtotal / totalItemsValue);
+                summaryHtml += `
+                    <li style="padding: 8px 0; border-bottom: 1px solid #e2e8f0; display: flex; justify-content: space-between; align-items: center;">
+                        <span style="font-weight: 600; color: #2d3748;">${person}</span>
+                        <div style="display: flex; align-items: center; gap: 10px;">
+                            <span style="color: #e53e3e; font-weight: 700; font-size: 1.1rem;">$${amount.toFixed(2)}</span>
+                            <button onclick="markAsPaid('${person}', ${personTotalBill.toFixed(2)})" 
+                                    class="quick-paid-btn" style="font-size: 0.8rem; padding: 4px 8px;">
+                                ✓ Paid
+                            </button>
+                        </div>
+                    </li>
+                `;
+            });
+            
+            summaryHtml += `
+                    </ul>
+                </div>
+            `;
+        } else {
+            summaryHtml += `
+                <div class="who-owes-section">
+                    <h4 style="margin: 20px 0 10px 0; color: #38a169; font-size: 1.1rem;">✅ Everyone Has Paid!</h4>
+                </div>
+            `;
+        }
+        
+        summaryHtml += `
+                ${remainingBalance <= 0.01 ? 
+                    '<div class="all-paid">🎉 All payments received!</div>' : 
+                    `<div class="pending-payment">Still waiting for $${remainingBalance.toFixed(2)} total</div>`
+                }
+            </div>
+        `;
+        
+        // Add guest confirmation status section
+        if (receiptData.confirmedGuests && Object.keys(receiptData.confirmedGuests).length > 0) {
+            summaryHtml += `
+                <div class="summary-card confirmation-status">
+                    <div class="summary-name">📋 Guest Confirmation Status</div>
+                    <div class="confirmation-list">
+            `;
+            
+            // Show all people who have claimed items and their confirmation status
+            Object.keys(people).forEach(person => {
+                const isConfirmed = receiptData.confirmedGuests[person];
+                const confirmTime = isConfirmed ? new Date(isConfirmed.confirmedAt).toLocaleString() : null;
+                
+                summaryHtml += `
+                    <div class="guest-status ${isConfirmed ? 'confirmed' : 'pending'}">
+                        <div class="guest-info">
+                            <span class="guest-name">${person}</span>
+                            <span class="confirmation-badge">
+                                ${isConfirmed ? '✅ Confirmed' : '⏳ Pending'}
+                            </span>
+                        </div>
+                        ${isConfirmed ? `
+                            <div class="confirm-time">Confirmed: ${confirmTime}</div>
+                        ` : `
+                            <div class="pending-note">Waiting for confirmation</div>
+                        `}
+                    </div>
+                `;
+            });
+            
+            summaryHtml += `
+                    </div>
+                </div>
+            `;
+        }
     } else {
         summaryHtml += `
             <div class="summary-card">
@@ -763,7 +1101,6 @@ function renderSummary() {
         `;
     }
     
-    // Show unclaimed items if any
     const unclaimedItems = receiptData.items.filter(item => 
         !item.claimedBy || item.claimedBy.length === 0
     );
@@ -787,38 +1124,7 @@ function renderSummary() {
     summaryContainer.innerHTML = summaryHtml;
 }
 
-function updatePayment(person, amount) {
-    const paymentAmount = parseFloat(amount) || 0;
-    receiptData.payments[person] = paymentAmount;
-    
-    if (currentReceiptId) {
-        localStorage.setItem(`receipt_${currentReceiptId}`, JSON.stringify(receiptData));
-    }
-    
-    renderSummary();
-}
 
-function markAsPaid(person, totalAmount) {
-    if (confirm(`Mark ${person} as fully paid ($${totalAmount})?`)) {
-        receiptData.payments[person] = parseFloat(totalAmount);
-        
-        if (currentReceiptId) {
-            localStorage.setItem(`receipt_${currentReceiptId}`, JSON.stringify(receiptData));
-        }
-        
-        renderSummary();
-        
-        const button = event.target;
-        const originalText = button.textContent;
-        button.textContent = '✓ Marked Paid';
-        button.style.background = '#38a169';
-        button.disabled = true;
-        
-        setTimeout(() => {
-            renderSummary();
-        }, 1500);
-    }
-}
 
 function refreshSummary() {
     if (currentReceiptId) {
@@ -1044,95 +1350,5 @@ function initializeApp() {
     } catch (error) {
         console.error('App initialization failed:', error);
         alert('There was an error loading the app. Please refresh the page.');
-    }
-}
-
-// Add this to your JavaScript
-const JSONBIN_API_KEY = 'YOUR_API_KEY'; // Get free key from jsonbin.io
-
-async function generateShareLink() {
-    const receiptName = document.getElementById('receipt-name').value.trim();
-    const tax = parseFloat(document.getElementById('tax-amount').value) || 0;
-    const tip = parseFloat(document.getElementById('tip-amount').value) || 0;
-    
-    if (!receiptName) {
-        alert('Please enter a receipt name');
-        document.getElementById('receipt-name').focus();
-        return;
-    }
-    
-    if (receiptData.items.length === 0) {
-        alert('Please add at least one item from your receipt');
-        document.getElementById('item-name').focus();
-        return;
-    }
-    
-    receiptData.name = receiptName;
-    receiptData.tax = tax;
-    receiptData.tip = tip;
-    
-    try {
-        // Upload to JSONBin
-        const response = await fetch('https://api.jsonbin.io/v3/b', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'X-Master-Key': JSONBIN_API_KEY
-            },
-            body: JSON.stringify(receiptData)
-        });
-        
-        const result = await response.json();
-        const binId = result.metadata.id;
-        
-        const shareUrl = `${window.location.origin}${window.location.pathname}?receipt=${binId}`;
-        document.getElementById('share-url').value = shareUrl;
-        document.getElementById('share-link').style.display = 'block';
-        
-        // Save locally too
-        currentReceiptId = binId;
-        localStorage.setItem(`receipt_${currentReceiptId}`, JSON.stringify(receiptData));
-        
-        document.getElementById('share-link').scrollIntoView({ behavior: 'smooth' });
-    } catch (error) {
-        console.error('Error creating share link:', error);
-        alert('Error creating share link. Please try again.');
-    }
-}
-
-async function loadSharedReceipt(receiptId) {
-    try {
-        // First try localStorage
-        let savedData = localStorage.getItem(`receipt_${receiptId}`);
-        
-        if (!savedData) {
-            // If not in localStorage, try fetching from JSONBin
-            const response = await fetch(`https://api.jsonbin.io/v3/b/${receiptId}/latest`, {
-                headers: {
-                    'X-Master-Key': JSONBIN_API_KEY
-                }
-            });
-            
-            if (response.ok) {
-                const result = await response.json();
-                savedData = JSON.stringify(result.record);
-                // Cache locally
-                localStorage.setItem(`receipt_${receiptId}`, savedData);
-            }
-        }
-        
-        if (savedData) {
-            receiptData = JSON.parse(savedData);
-            if (!receiptData.confirmedGuests) {
-                receiptData.confirmedGuests = {};
-            }
-            document.getElementById('receipt-title').textContent = receiptData.name;
-            renderGuestItems();
-        } else {
-            alert('Receipt not found! Please check your link.');
-        }
-    } catch (error) {
-        console.error('Error loading receipt:', error);
-        alert('Error loading receipt. Please check your link.');
     }
 }
