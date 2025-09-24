@@ -302,6 +302,250 @@ function deleteItem(id) {
     saveCurrentReceipt();
 }
 
+// Updated generateShareLink with Firebase
+async function generateShareLink() {
+    const receiptName = document.getElementById('receipt-name').value.trim();
+    const tax = parseFloat(document.getElementById('tax-amount').value) || 0;
+    const tip = parseFloat(document.getElementById('tip-amount').value) || 0;
+    
+    if (!receiptName) {
+        alert('Please enter a receipt name');
+        document.getElementById('receipt-name').focus();
+        return;
+    }
+    
+    if (receiptData.items.length === 0) {
+        alert('Please add at least one item from your receipt');
+        document.getElementById('item-name').focus();
+        return;
+    }
+    
+    receiptData.name = receiptName;
+    receiptData.tax = tax;
+    receiptData.tip = tip;
+    
+    try {
+        // Save to Firebase
+        const receiptRef = database.ref('receipts').push();
+        await receiptRef.set(receiptData);
+        
+        currentReceiptId = receiptRef.key;
+        
+        // Also save locally
+        localStorage.setItem(`receipt_${currentReceiptId}`, JSON.stringify(receiptData));
+        receipts[currentReceiptId] = { ...receiptData };
+        
+        const shareUrl = `${window.location.origin}${window.location.pathname}?receipt=${currentReceiptId}`;
+        document.getElementById('share-url').value = shareUrl;
+        document.getElementById('share-link').style.display = 'block';
+        
+        console.log('Receipt saved to Firebase:', currentReceiptId);
+        document.getElementById('share-link').scrollIntoView({ behavior: 'smooth' });
+        
+    } catch (error) {
+        console.error('Error saving to Firebase:', error);
+        alert('Error creating share link. Please check your internet connection.');
+    }
+}
+
+// Updated loadSharedReceipt with Firebase sync
+function loadSharedReceipt(receiptId) {
+    console.log('Loading shared receipt:', receiptId);
+    currentReceiptId = receiptId;
+    
+    const receiptRef = database.ref(`receipts/${receiptId}`);
+    
+    // Listen for real-time updates
+    receiptRef.on('value', (snapshot) => {
+        const data = snapshot.val();
+        if (data) {
+            console.log('Received updated data from Firebase');
+            receiptData = data;
+            
+            // Ensure required properties exist
+            if (!receiptData.confirmedGuests) {
+                receiptData.confirmedGuests = {};
+            }
+            if (!receiptData.payments) {
+                receiptData.payments = {};
+            }
+            
+            // Cache locally
+            localStorage.setItem(`receipt_${receiptId}`, JSON.stringify(receiptData));
+            
+            // Update UI
+            document.getElementById('receipt-title').textContent = receiptData.name;
+            if (!isHost) {
+                renderGuestItems();
+            }
+        } else {
+            console.error('Receipt not found in Firebase');
+            alert('Receipt not found! Please check your link.');
+        }
+    }, (error) => {
+        console.error('Firebase error:', error);
+        alert('Error loading receipt. Please check your internet connection.');
+    });
+}
+
+// Updated toggleItemSelection with Firebase sync
+function toggleItemSelection(itemId) {
+    if (!currentGuest) {
+        alert('Please set your name first');
+        return;
+    }
+    
+    const item = receiptData.items.find(i => i.id === itemId);
+    if (!item) return;
+    
+    const index = item.claimedBy.indexOf(currentGuest);
+    if (index > -1) {
+        item.claimedBy.splice(index, 1);
+    } else {
+        item.claimedBy.push(currentGuest);
+    }
+    
+    // Reset confirmation status when items change
+    if (receiptData.confirmedGuests && receiptData.confirmedGuests[currentGuest]) {
+        delete receiptData.confirmedGuests[currentGuest];
+    }
+    
+    // Save to Firebase (real-time sync)
+    if (currentReceiptId) {
+        database.ref(`receipts/${currentReceiptId}`).set(receiptData)
+            .then(() => {
+                console.log('Item selection synced to Firebase');
+            })
+            .catch((error) => {
+                console.error('Error syncing to Firebase:', error);
+                alert('Error syncing changes. Please check your connection.');
+            });
+    }
+    
+    renderGuestItems();
+}
+
+// Updated confirmSelectionWithHost with Firebase sync
+function confirmSelectionWithHost() {
+    if (!currentGuest) {
+        alert('Please set your name first');
+        return;
+    }
+    
+    const myItems = receiptData.items.filter(item => 
+        item.claimedBy.includes(currentGuest)
+    );
+    
+    if (myItems.length === 0) {
+        alert('Please select at least one item before confirming');
+        return;
+    }
+    
+    // Mark this guest as confirmed
+    if (!receiptData.confirmedGuests) {
+        receiptData.confirmedGuests = {};
+    }
+    
+    receiptData.confirmedGuests[currentGuest] = {
+        confirmedAt: new Date().toISOString(),
+        items: myItems.map(item => item.name),
+        total: myItems.reduce((sum, item) => sum + item.price, 0)
+    };
+    
+    // Save to Firebase
+    if (currentReceiptId) {
+        database.ref(`receipts/${currentReceiptId}`).set(receiptData)
+            .then(() => {
+                console.log('Confirmation synced to Firebase');
+                updateGuestTotal();
+                alert('Your selection has been confirmed and synced with the host!');
+            })
+            .catch((error) => {
+                console.error('Error syncing confirmation:', error);
+                alert('Error confirming selection. Please try again.');
+            });
+    }
+}
+
+// Updated updatePayment with Firebase sync
+function updatePayment(person, amount) {
+    const paymentAmount = parseFloat(amount) || 0;
+    receiptData.payments[person] = paymentAmount;
+    
+    // Save to Firebase
+    if (currentReceiptId) {
+        database.ref(`receipts/${currentReceiptId}/payments`).set(receiptData.payments)
+            .then(() => {
+                console.log('Payment update synced to Firebase');
+            })
+            .catch((error) => {
+                console.error('Error syncing payment:', error);
+            });
+    }
+    
+    renderSummary();
+}
+
+// Updated markAsPaid with Firebase sync
+function markAsPaid(person, totalAmount) {
+    if (confirm(`Mark ${person} as fully paid ($${totalAmount})?`)) {
+        receiptData.payments[person] = parseFloat(totalAmount);
+        
+        // Save to Firebase
+        if (currentReceiptId) {
+            database.ref(`receipts/${currentReceiptId}/payments`).set(receiptData.payments)
+                .then(() => {
+                    console.log('Payment marked and synced to Firebase');
+                    renderSummary();
+                })
+                .catch((error) => {
+                    console.error('Error syncing payment:', error);
+                    alert('Error updating payment. Please try again.');
+                });
+        }
+        
+        const button = event.target;
+        const originalText = button.textContent;
+        button.textContent = 'Marked Paid';
+        button.style.background = '#38a169';
+        button.disabled = true;
+        
+        setTimeout(() => {
+            renderSummary();
+        }, 1500);
+    }
+}
+
+// Add real-time listener for host summary view
+function showSummary() {
+    if (receiptData.items.length === 0) {
+        alert('No items to summarize. Please add items first.');
+        return;
+    }
+    
+    receiptData.name = document.getElementById('receipt-name').value.trim() || 'Untitled Receipt';
+    receiptData.tax = parseFloat(document.getElementById('tax-amount').value) || 0;
+    receiptData.tip = parseFloat(document.getElementById('tip-amount').value) || 0;
+    
+    // Start listening for real-time updates
+    if (currentReceiptId) {
+        const receiptRef = database.ref(`receipts/${currentReceiptId}`);
+        receiptRef.on('value', (snapshot) => {
+            const data = snapshot.val();
+            if (data) {
+                // Merge updated data
+                receiptData.items = data.items || receiptData.items;
+                receiptData.payments = data.payments || {};
+                receiptData.confirmedGuests = data.confirmedGuests || {};
+                
+                renderSummary();
+            }
+        });
+    }
+    
+    showSummarySection();
+    renderSummary();
+}
 function generateShareLink() {
     const receiptName = document.getElementById('receipt-name').value.trim();
     const tax = parseFloat(document.getElementById('tax-amount').value) || 0;
@@ -460,70 +704,6 @@ function checkUrlParams() {
     }
 }
 
-// Update the toggleItemSelection function to save back to URL-based storage
-function toggleItemSelection(itemId) {
-    if (!currentGuest) {
-        alert('Please set your name first');
-        return;
-    }
-    
-    const item = receiptData.items.find(i => i.id === itemId);
-    if (!item) return;
-    
-    const index = item.claimedBy.indexOf(currentGuest);
-    if (index > -1) {
-        item.claimedBy.splice(index, 1);
-    } else {
-        item.claimedBy.push(currentGuest);
-    }
-    
-    // Reset confirmation status when items change
-    if (receiptData.confirmedGuests && receiptData.confirmedGuests[currentGuest]) {
-        delete receiptData.confirmedGuests[currentGuest];
-    }
-    
-    // Save to localStorage for this session
-    localStorage.setItem(`receipt_${currentReceiptId}`, JSON.stringify(receiptData));
-    
-    renderGuestItems();
-}
-
-// Update confirmSelectionWithHost to work with URL-based sharing
-function confirmSelectionWithHost() {
-    if (!currentGuest) {
-        alert('Please set your name first');
-        return;
-    }
-    
-    const myItems = receiptData.items.filter(item => 
-        item.claimedBy.includes(currentGuest)
-    );
-    
-    if (myItems.length === 0) {
-        alert('Please select at least one item before confirming');
-        return;
-    }
-    
-    // Mark this guest as confirmed
-    if (!receiptData.confirmedGuests) {
-        receiptData.confirmedGuests = {};
-    }
-    
-    receiptData.confirmedGuests[currentGuest] = {
-        confirmedAt: new Date().toISOString(),
-        items: myItems.map(item => item.name),
-        total: myItems.reduce((sum, item) => sum + item.price, 0)
-    };
-    
-    // Save to localStorage for this session
-    localStorage.setItem(`receipt_${currentReceiptId}`, JSON.stringify(receiptData));
-    
-    // Update the display
-    updateGuestTotal();
-    
-    // Show success feedback with instructions
-    alert(`Your selection has been confirmed!\n\nIMPORTANT: Your selections are saved locally on this device. To sync with the host, you need to tell them to check their payment summary and refresh it to see your latest selections.`);
-}
 
 function copyLink() {
     const shareUrl = document.getElementById('share-url');
@@ -541,23 +721,6 @@ function copyLink() {
         button.textContent = originalText;
         button.style.background = '';
     }, 2000);
-}
-
-function loadSharedReceipt(receiptId) {
-    const savedData = localStorage.getItem(`receipt_${receiptId}`);
-    if (savedData) {
-        receiptData = JSON.parse(savedData);
-        
-        // Ensure confirmedGuests exists
-        if (!receiptData.confirmedGuests) {
-            receiptData.confirmedGuests = {};
-        }
-        
-        document.getElementById('receipt-title').textContent = receiptData.name;
-        renderGuestItems();
-    } else {
-        alert('Receipt not found! Please check your link.');
-    }
 }
 
 function setGuestName() {
@@ -961,38 +1124,7 @@ function renderSummary() {
     summaryContainer.innerHTML = summaryHtml;
 }
 
-function updatePayment(person, amount) {
-    const paymentAmount = parseFloat(amount) || 0;
-    receiptData.payments[person] = paymentAmount;
-    
-    if (currentReceiptId) {
-        localStorage.setItem(`receipt_${currentReceiptId}`, JSON.stringify(receiptData));
-    }
-    
-    renderSummary();
-}
 
-function markAsPaid(person, totalAmount) {
-    if (confirm(`Mark ${person} as fully paid ($${totalAmount})?`)) {
-        receiptData.payments[person] = parseFloat(totalAmount);
-        
-        if (currentReceiptId) {
-            localStorage.setItem(`receipt_${currentReceiptId}`, JSON.stringify(receiptData));
-        }
-        
-        renderSummary();
-        
-        const button = event.target;
-        const originalText = button.textContent;
-        button.textContent = '✓ Marked Paid';
-        button.style.background = '#38a169';
-        button.disabled = true;
-        
-        setTimeout(() => {
-            renderSummary();
-        }, 1500);
-    }
-}
 
 function refreshSummary() {
     if (currentReceiptId) {
