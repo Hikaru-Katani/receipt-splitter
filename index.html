@@ -1,23 +1,4 @@
-<!-- Add before your script.js -->
-<script src="https://www.gstatic.com/firebasejs/9.0.0/firebase-app-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/9.0.0/firebase-database-compat.js"></script>
-<script>
-  // Firebase configuration
-  const firebaseConfig = {
-    apiKey: "AIzaSyAy3oE9M6_kUUt5epSkUFhxd_JDjrOjX2E",
-    authDomain: "receipt-669a3.firebaseapp.com",
-    databaseURL: "https://receipt-669a3-default-rtdb.firebaseio.com",
-    projectId: "receipt-669a3",
-    storageBucket: "receipt-669a3.firebasestorage.app",
-    messagingSenderId: "651338156055",
-    appId: "1:651338156055:web:6d75ddefb5901e5739b452"
-  };
-  
-  // Initialize Firebase
-  firebase.initializeApp(firebaseConfig);
-  const database = firebase.database();
-</script>
-<script src="script.js"></script><!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
@@ -110,20 +91,38 @@
                 <button onclick="refreshSummary()" class="primary-btn">🔄 Refresh Summary</button>
             </div>
         </div>
+
+        <!-- Receipt Dashboard -->
+        <div id="receipt-dashboard" class="section" style="display: block;">
+            <h2>My Receipts</h2>
+            <div class="dashboard-actions">
+                <button onclick="createNewReceipt()" class="primary-btn">+ Create New Receipt</button>
+                <button onclick="refreshReceiptList()" class="secondary-btn">Refresh List</button>
+            </div>
+            
+            <div id="receipts-list" class="receipts-container">
+                <div class="empty-state">No receipts yet. Create your first receipt to get started!</div>
+            </div>
+        </div>
     </div>
 
-    <!-- Receipt Dashboard -->
-<div id="receipt-dashboard" class="section" style="display: block;">
-    <h2>My Receipts</h2>
-    <div class="dashboard-actions">
-        <button onclick="createNewReceipt()" class="primary-btn">+ Create New Receipt</button>
-        <button onclick="refreshReceiptList()" class="secondary-btn">Refresh List</button>
-    </div>
-    
-    <div id="receipts-list" class="receipts-container">
-        <div class="empty-state">No receipts yet. Create your first receipt to get started!</div>
-    </div>
-</div>
+    <!-- Firebase Scripts -->
+    <script src="https://www.gstatic.com/firebasejs/9.0.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.0.0/firebase-database-compat.js"></script>
+    <script>
+      const firebaseConfig = {
+        apiKey: "AIzaSyAy3oE9M6_kUUt5epSkUFhxd_JDjrOjX2E",
+        authDomain: "receipt-669a3.firebaseapp.com",
+        databaseURL: "https://receipt-669a3-default-rtdb.firebaseio.com",
+        projectId: "receipt-669a3",
+        storageBucket: "receipt-669a3.firebasestorage.app",
+        messagingSenderId: "651338156055",
+        appId: "1:651338156055:web:6d75ddefb5901e5739b452"
+      };
+      
+      firebase.initializeApp(firebaseConfig);
+      const database = firebase.database();
+    </script>
     <script src="script.js"></script>
 </body>
 </html>
