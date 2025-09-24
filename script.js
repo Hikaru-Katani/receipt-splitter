@@ -1,5 +1,5 @@
 // Global state
-let receipts = {}; // Store all receipts
+let receipts = {};
 let currentReceiptId = null;
 let receiptData = {
     name: '',
@@ -13,6 +13,7 @@ let receiptData = {
 
 let currentGuest = '';
 let isHost = true;
+let firebaseListener = null; // Track Firebase listener
 
 // Initialize app
 document.addEventListener('DOMContentLoaded', function() {
@@ -23,6 +24,19 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 });
 
+function checkUrlParams() {
+    const urlParams = new URLSearchParams(window.location.search);
+    const receiptId = urlParams.get('receipt');
+    
+    if (receiptId) {
+        isHost = false;
+        loadSharedReceipt(receiptId);
+        showGuestSection();
+    } else {
+        isHost = true;
+        showDashboard();
+    }
+}
 
 function showDashboard() {
     document.getElementById('receipt-dashboard').style.display = 'block';
@@ -71,7 +85,6 @@ function loadAllReceipts() {
     }
 }
 
-// Render the receipt dashboard
 function renderReceiptDashboard() {
     const container = document.getElementById('receipts-list');
     const receiptIds = Object.keys(receipts);
@@ -131,9 +144,14 @@ function renderReceiptDashboard() {
     });
 }
 
-// Create new receipt
 function createNewReceipt() {
-    currentReceiptId = Date.now().toString();
+    // Clean up any existing Firebase listeners
+    if (firebaseListener) {
+        firebaseListener.off();
+        firebaseListener = null;
+    }
+    
+    currentReceiptId = null;
     receiptData = {
         name: '',
         items: [],
@@ -158,12 +176,16 @@ function createNewReceipt() {
     document.getElementById('receipt-name').focus();
 }
 
-// Edit existing receipt
 function editReceipt(receiptId) {
+    // Clean up any existing Firebase listeners
+    if (firebaseListener) {
+        firebaseListener.off();
+        firebaseListener = null;
+    }
+    
     currentReceiptId = receiptId;
     receiptData = { ...receipts[receiptId] };
     
-    // Ensure confirmedGuests exists
     if (!receiptData.confirmedGuests) {
         receiptData.confirmedGuests = {};
     }
@@ -175,8 +197,10 @@ function editReceipt(receiptId) {
     document.getElementById('item-name').value = '';
     document.getElementById('item-price').value = '';
     
-    // Set up share link if this receipt has items
-    if (receiptData.items.length > 0) {
+    // Check if this is a Firebase receipt
+    if (receiptId.startsWith('-') || receiptId.length > 15) {
+        // This looks like a Firebase ID, set up real-time sync
+        setupFirebaseSync(receiptId);
         const shareUrl = `${window.location.origin}${window.location.pathname}?receipt=${receiptId}`;
         document.getElementById('share-url').value = shareUrl;
         document.getElementById('share-link').style.display = 'block';
@@ -189,21 +213,23 @@ function editReceipt(receiptId) {
     renderItems();
 }
 
-// View receipt summary
 function viewReceiptSummary(receiptId) {
     currentReceiptId = receiptId;
     receiptData = { ...receipts[receiptId] };
     
-    // Ensure confirmedGuests exists
     if (!receiptData.confirmedGuests) {
         receiptData.confirmedGuests = {};
+    }
+    
+    // Set up Firebase sync for summary if it's a Firebase receipt
+    if (receiptId.startsWith('-') || receiptId.length > 15) {
+        setupFirebaseSync(receiptId);
     }
     
     showSummarySection();
     renderSummary();
 }
 
-// Delete receipt
 function deleteReceipt(receiptId) {
     const receipt = receipts[receiptId];
     if (confirm(`Delete "${receipt.name || 'Untitled Receipt'}"? This cannot be undone.`)) {
@@ -213,15 +239,18 @@ function deleteReceipt(receiptId) {
     }
 }
 
-// Refresh receipt list
 function refreshReceiptList() {
     loadAllReceipts();
     renderReceiptDashboard();
 }
 
-// Update back buttons to go to dashboard
 function backToDashboard() {
-    // Save current receipt if it has data
+    // Clean up Firebase listeners
+    if (firebaseListener) {
+        firebaseListener.off();
+        firebaseListener = null;
+    }
+    
     if (currentReceiptId && (receiptData.items.length > 0 || receiptData.name)) {
         saveCurrentReceipt();
     }
@@ -231,10 +260,8 @@ function backToDashboard() {
     showDashboard();
 }
 
-// Save current receipt
 function saveCurrentReceipt() {
     if (currentReceiptId) {
-        // Update receipt data with current form values
         receiptData.name = document.getElementById('receipt-name').value.trim() || 'Untitled Receipt';
         receiptData.tax = parseFloat(document.getElementById('tax-amount').value) || 0;
         receiptData.tip = parseFloat(document.getElementById('tip-amount').value) || 0;
@@ -265,7 +292,7 @@ function addItem() {
     document.getElementById('item-price').value = '';
     
     renderItems();
-    saveCurrentReceipt(); // Auto-save
+    saveCurrentReceipt();
     
     document.getElementById('item-name').focus();
 }
@@ -302,7 +329,7 @@ function deleteItem(id) {
     saveCurrentReceipt();
 }
 
-// Updated generateShareLink with Firebase
+// Firebase-enabled share link generation
 async function generateShareLink() {
     const receiptName = document.getElementById('receipt-name').value.trim();
     const tax = parseFloat(document.getElementById('tax-amount').value) || 0;
@@ -330,6 +357,10 @@ async function generateShareLink() {
         await receiptRef.set(receiptData);
         
         currentReceiptId = receiptRef.key;
+        console.log('Receipt saved to Firebase:', currentReceiptId);
+        
+        // Set up real-time sync for the host
+        setupFirebaseSync(currentReceiptId);
         
         // Also save locally
         localStorage.setItem(`receipt_${currentReceiptId}`, JSON.stringify(receiptData));
@@ -339,7 +370,6 @@ async function generateShareLink() {
         document.getElementById('share-url').value = shareUrl;
         document.getElementById('share-link').style.display = 'block';
         
-        console.log('Receipt saved to Firebase:', currentReceiptId);
         document.getElementById('share-link').scrollIntoView({ behavior: 'smooth' });
         
     } catch (error) {
@@ -348,379 +378,51 @@ async function generateShareLink() {
     }
 }
 
-// Updated loadSharedReceipt with Firebase sync
+// Set up Firebase real-time sync
+function setupFirebaseSync(receiptId) {
+    // Clean up existing listener
+    if (firebaseListener) {
+        firebaseListener.off();
+    }
+    
+    firebaseListener = database.ref(`receipts/${receiptId}`);
+    
+    firebaseListener.on('value', (snapshot) => {
+        const data = snapshot.val();
+        if (data) {
+            console.log('Received Firebase update:', data);
+            
+            // Update local data
+            receiptData = {
+                ...receiptData,  // Keep form values for host
+                items: data.items || [],
+                payments: data.payments || {},
+                confirmedGuests: data.confirmedGuests || {}
+            };
+            
+            // Cache locally
+            localStorage.setItem(`receipt_${receiptId}`, JSON.stringify(receiptData));
+            receipts[receiptId] = { ...receiptData };
+            
+            // Update UI based on current view
+            if (document.getElementById('guest-section').style.display === 'block') {
+                document.getElementById('receipt-title').textContent = receiptData.name;
+                if (currentGuest) {
+                    renderGuestItems();
+                }
+            } else if (document.getElementById('summary-section').style.display === 'block') {
+                renderSummary();
+            }
+        }
+    });
+}
+
 function loadSharedReceipt(receiptId) {
     console.log('Loading shared receipt:', receiptId);
     currentReceiptId = receiptId;
     
-    const receiptRef = database.ref(`receipts/${receiptId}`);
-    
-    // Listen for real-time updates
-    receiptRef.on('value', (snapshot) => {
-        const data = snapshot.val();
-        if (data) {
-            console.log('Received updated data from Firebase');
-            receiptData = data;
-            
-            // Ensure required properties exist
-            if (!receiptData.confirmedGuests) {
-                receiptData.confirmedGuests = {};
-            }
-            if (!receiptData.payments) {
-                receiptData.payments = {};
-            }
-            
-            // Cache locally
-            localStorage.setItem(`receipt_${receiptId}`, JSON.stringify(receiptData));
-            
-            // Update UI
-            document.getElementById('receipt-title').textContent = receiptData.name;
-            if (!isHost) {
-                renderGuestItems();
-            }
-        } else {
-            console.error('Receipt not found in Firebase');
-            alert('Receipt not found! Please check your link.');
-        }
-    }, (error) => {
-        console.error('Firebase error:', error);
-        alert('Error loading receipt. Please check your internet connection.');
-    });
-}
-
-// Updated toggleItemSelection with Firebase sync
-function toggleItemSelection(itemId) {
-    if (!currentGuest) {
-        alert('Please set your name first');
-        return;
-    }
-    
-    const item = receiptData.items.find(i => i.id === itemId);
-    if (!item) return;
-    
-    const index = item.claimedBy.indexOf(currentGuest);
-    if (index > -1) {
-        item.claimedBy.splice(index, 1);
-    } else {
-        item.claimedBy.push(currentGuest);
-    }
-    
-    // Reset confirmation status when items change
-    if (receiptData.confirmedGuests && receiptData.confirmedGuests[currentGuest]) {
-        delete receiptData.confirmedGuests[currentGuest];
-    }
-    
-    // Save to Firebase (real-time sync)
-    if (currentReceiptId) {
-        database.ref(`receipts/${currentReceiptId}`).set(receiptData)
-            .then(() => {
-                console.log('Item selection synced to Firebase');
-            })
-            .catch((error) => {
-                console.error('Error syncing to Firebase:', error);
-                alert('Error syncing changes. Please check your connection.');
-            });
-    }
-    
-    renderGuestItems();
-}
-
-// Updated confirmSelectionWithHost with Firebase sync
-function confirmSelectionWithHost() {
-    if (!currentGuest) {
-        alert('Please set your name first');
-        return;
-    }
-    
-    const myItems = receiptData.items.filter(item => 
-        item.claimedBy.includes(currentGuest)
-    );
-    
-    if (myItems.length === 0) {
-        alert('Please select at least one item before confirming');
-        return;
-    }
-    
-    // Mark this guest as confirmed
-    if (!receiptData.confirmedGuests) {
-        receiptData.confirmedGuests = {};
-    }
-    
-    receiptData.confirmedGuests[currentGuest] = {
-        confirmedAt: new Date().toISOString(),
-        items: myItems.map(item => item.name),
-        total: myItems.reduce((sum, item) => sum + item.price, 0)
-    };
-    
-    // Save to Firebase
-    if (currentReceiptId) {
-        database.ref(`receipts/${currentReceiptId}`).set(receiptData)
-            .then(() => {
-                console.log('Confirmation synced to Firebase');
-                updateGuestTotal();
-                alert('Your selection has been confirmed and synced with the host!');
-            })
-            .catch((error) => {
-                console.error('Error syncing confirmation:', error);
-                alert('Error confirming selection. Please try again.');
-            });
-    }
-}
-
-// Updated updatePayment with Firebase sync
-function updatePayment(person, amount) {
-    const paymentAmount = parseFloat(amount) || 0;
-    receiptData.payments[person] = paymentAmount;
-    
-    // Save to Firebase
-    if (currentReceiptId) {
-        database.ref(`receipts/${currentReceiptId}/payments`).set(receiptData.payments)
-            .then(() => {
-                console.log('Payment update synced to Firebase');
-            })
-            .catch((error) => {
-                console.error('Error syncing payment:', error);
-            });
-    }
-    
-    renderSummary();
-}
-
-// Updated markAsPaid with Firebase sync
-function markAsPaid(person, totalAmount) {
-    if (confirm(`Mark ${person} as fully paid ($${totalAmount})?`)) {
-        receiptData.payments[person] = parseFloat(totalAmount);
-        
-        // Save to Firebase
-        if (currentReceiptId) {
-            database.ref(`receipts/${currentReceiptId}/payments`).set(receiptData.payments)
-                .then(() => {
-                    console.log('Payment marked and synced to Firebase');
-                    renderSummary();
-                })
-                .catch((error) => {
-                    console.error('Error syncing payment:', error);
-                    alert('Error updating payment. Please try again.');
-                });
-        }
-        
-        const button = event.target;
-        const originalText = button.textContent;
-        button.textContent = 'Marked Paid';
-        button.style.background = '#38a169';
-        button.disabled = true;
-        
-        setTimeout(() => {
-            renderSummary();
-        }, 1500);
-    }
-}
-
-// Add real-time listener for host summary view
-function showSummary() {
-    if (receiptData.items.length === 0) {
-        alert('No items to summarize. Please add items first.');
-        return;
-    }
-    
-    receiptData.name = document.getElementById('receipt-name').value.trim() || 'Untitled Receipt';
-    receiptData.tax = parseFloat(document.getElementById('tax-amount').value) || 0;
-    receiptData.tip = parseFloat(document.getElementById('tip-amount').value) || 0;
-    
-    // Start listening for real-time updates
-    if (currentReceiptId) {
-        const receiptRef = database.ref(`receipts/${currentReceiptId}`);
-        receiptRef.on('value', (snapshot) => {
-            const data = snapshot.val();
-            if (data) {
-                // Merge updated data
-                receiptData.items = data.items || receiptData.items;
-                receiptData.payments = data.payments || {};
-                receiptData.confirmedGuests = data.confirmedGuests || {};
-                
-                renderSummary();
-            }
-        });
-    }
-    
-    showSummarySection();
-    renderSummary();
-}
-function generateShareLink() {
-    const receiptName = document.getElementById('receipt-name').value.trim();
-    const tax = parseFloat(document.getElementById('tax-amount').value) || 0;
-    const tip = parseFloat(document.getElementById('tip-amount').value) || 0;
-    
-    if (!receiptName) {
-        alert('Please enter a receipt name');
-        document.getElementById('receipt-name').focus();
-        return;
-    }
-    
-    if (receiptData.items.length === 0) {
-        alert('Please add at least one item from your receipt');
-        document.getElementById('item-name').focus();
-        return;
-    }
-    
-    receiptData.name = receiptName;
-    receiptData.tax = tax;
-    receiptData.tip = tip;
-    
-    try {
-        // Create a clean copy of data without unnecessary properties
-        const cleanData = {
-            name: receiptData.name,
-            items: receiptData.items.map(item => ({
-                id: item.id,
-                name: item.name,
-                price: item.price,
-                claimedBy: item.claimedBy || []
-            })),
-            tax: receiptData.tax,
-            tip: receiptData.tip,
-            confirmedGuests: {},
-            payments: {}
-        };
-        
-        console.log('Clean data size:', JSON.stringify(cleanData).length);
-        
-        // Try URL encoding method
-        const jsonString = JSON.stringify(cleanData);
-        console.log('JSON string length:', jsonString.length);
-        
-        if (jsonString.length > 2000) {
-            // Fallback: use localStorage method instead
-            console.log('Data too large for URL, using localStorage method');
-            
-            if (!currentReceiptId) {
-                currentReceiptId = Date.now().toString();
-            }
-            
-            localStorage.setItem(`receipt_${currentReceiptId}`, JSON.stringify(cleanData));
-            receipts[currentReceiptId] = { ...cleanData };
-            
-            // Generate a shorter URL using receipt ID
-            const shareUrl = `${window.location.origin}${window.location.pathname}?receipt=${currentReceiptId}`;
-            document.getElementById('share-url').value = shareUrl;
-            
-            alert('Share link created! Note: Your friends will need to visit this link from a device that has accessed this receipt before, or you can manually share the receipt details with them.');
-        } else {
-            // Use URL encoding method for smaller data
-            const encodedData = btoa(unescape(encodeURIComponent(jsonString)));
-            console.log('Encoded data length:', encodedData.length);
-            
-            const shareUrl = `${window.location.origin}${window.location.pathname}?data=${encodedData}`;
-            console.log('Final URL length:', shareUrl.length);
-            
-            if (shareUrl.length > 2048) {
-                throw new Error('URL too long even after compression');
-            }
-            
-            document.getElementById('share-url').value = shareUrl;
-        }
-        
-        // Also save locally for host
-        if (!currentReceiptId) {
-            currentReceiptId = Date.now().toString();
-        }
-        localStorage.setItem(`receipt_${currentReceiptId}`, JSON.stringify(cleanData));
-        receipts[currentReceiptId] = { ...cleanData };
-        
-        document.getElementById('share-link').style.display = 'block';
-        console.log('Share link generated successfully');
-        document.getElementById('share-link').scrollIntoView({ behavior: 'smooth' });
-        
-    } catch (error) {
-        console.error('Detailed error:', error);
-        
-        // Fallback method: just use receipt ID
-        try {
-            if (!currentReceiptId) {
-                currentReceiptId = Date.now().toString();
-            }
-            
-            localStorage.setItem(`receipt_${currentReceiptId}`, JSON.stringify(receiptData));
-            receipts[currentReceiptId] = { ...receiptData };
-            
-            const shareUrl = `${window.location.origin}${window.location.pathname}?receipt=${currentReceiptId}`;
-            document.getElementById('share-url').value = shareUrl;
-            document.getElementById('share-link').style.display = 'block';
-            
-            alert('Share link created using fallback method! Your friends can access this receipt by visiting the link from any device.');
-            
-        } catch (fallbackError) {
-            console.error('Fallback method also failed:', fallbackError);
-            alert('Unable to create share link. Try refreshing the page and creating a simpler receipt with fewer items.');
-        }
-    }
-}
-
-function checkUrlParams() {
-    const urlParams = new URLSearchParams(window.location.search);
-    const encodedData = urlParams.get('data');
-    const receiptId = urlParams.get('receipt');
-    
-    console.log('Checking URL params - data:', !!encodedData, 'receiptId:', receiptId);
-    
-    if (encodedData) {
-        // Guest mode - load from URL data
-        try {
-            console.log('Attempting to decode URL data...');
-            const decodedString = decodeURIComponent(escape(atob(encodedData)));
-            const decodedData = JSON.parse(decodedString);
-            
-            receiptData = decodedData;
-            if (!receiptData.confirmedGuests) {
-                receiptData.confirmedGuests = {};
-            }
-            if (!receiptData.payments) {
-                receiptData.payments = {};
-            }
-            
-            isHost = false;
-            currentReceiptId = 'shared_' + Date.now().toString();
-            localStorage.setItem(`receipt_${currentReceiptId}`, JSON.stringify(receiptData));
-            
-            console.log('Successfully loaded receipt from URL:', receiptData.name);
-            showGuestSection();
-            setTimeout(renderGuestItems, 100);
-            
-        } catch (error) {
-            console.error('Failed to decode URL data:', error);
-            alert('Invalid or corrupted share link. Please ask for a new link.');
-            showDashboard();
-        }
-    } else if (receiptId) {
-        // Load from localStorage using receipt ID
-        console.log('Loading receipt from localStorage:', receiptId);
-        isHost = false;
-        loadSharedReceipt(receiptId);
-        showGuestSection();
-    } else {
-        // Host mode
-        isHost = true;
-        showDashboard();
-    }
-}
-
-
-function copyLink() {
-    const shareUrl = document.getElementById('share-url');
-    shareUrl.select();
-    shareUrl.setSelectionRange(0, 99999);
-    document.execCommand('copy');
-    
-    // Show feedback
-    const button = event.target;
-    const originalText = button.textContent;
-    button.textContent = 'Copied!';
-    button.style.background = '#38a169';
-    
-    setTimeout(() => {
-        button.textContent = originalText;
-        button.style.background = '';
-    }, 2000);
+    // Set up Firebase sync for guests
+    setupFirebaseSync(receiptId);
 }
 
 function setGuestName() {
@@ -750,12 +452,12 @@ function renderGuestItems() {
         itemEl.className = 'item guest-item';
         itemEl.onclick = () => toggleItemSelection(item.id);
         
-        const isSelected = item.claimedBy.includes(currentGuest);
+        const isSelected = item.claimedBy && item.claimedBy.includes(currentGuest);
         if (isSelected) {
             itemEl.classList.add('selected');
         }
         
-        const otherClaimers = item.claimedBy.filter(name => name !== currentGuest);
+        const otherClaimers = (item.claimedBy || []).filter(name => name !== currentGuest);
         const claimerText = otherClaimers.length > 0 ? ` (also claimed by: ${otherClaimers.join(', ')})` : '';
         
         itemEl.innerHTML = `
@@ -772,12 +474,91 @@ function renderGuestItems() {
     updateGuestTotal();
 }
 
+function toggleItemSelection(itemId) {
+    if (!currentGuest) {
+        alert('Please set your name first');
+        return;
+    }
+    
+    const item = receiptData.items.find(i => i.id === itemId);
+    if (!item) return;
+    
+    // Initialize claimedBy if it doesn't exist
+    if (!item.claimedBy) {
+        item.claimedBy = [];
+    }
+    
+    const index = item.claimedBy.indexOf(currentGuest);
+    if (index > -1) {
+        item.claimedBy.splice(index, 1);
+    } else {
+        item.claimedBy.push(currentGuest);
+    }
+    
+    // Reset confirmation status when items change
+    if (receiptData.confirmedGuests && receiptData.confirmedGuests[currentGuest]) {
+        delete receiptData.confirmedGuests[currentGuest];
+    }
+    
+    // Save to Firebase
+    if (currentReceiptId) {
+        database.ref(`receipts/${currentReceiptId}`).set(receiptData)
+            .then(() => {
+                console.log('Item selection synced to Firebase');
+            })
+            .catch((error) => {
+                console.error('Error syncing to Firebase:', error);
+            });
+    }
+    
+    renderGuestItems();
+}
+
+function confirmSelectionWithHost() {
+    if (!currentGuest) {
+        alert('Please set your name first');
+        return;
+    }
+    
+    const myItems = receiptData.items.filter(item => 
+        item.claimedBy && item.claimedBy.includes(currentGuest)
+    );
+    
+    if (myItems.length === 0) {
+        alert('Please select at least one item before confirming');
+        return;
+    }
+    
+    if (!receiptData.confirmedGuests) {
+        receiptData.confirmedGuests = {};
+    }
+    
+    receiptData.confirmedGuests[currentGuest] = {
+        confirmedAt: new Date().toISOString(),
+        items: myItems.map(item => item.name),
+        total: myItems.reduce((sum, item) => sum + item.price, 0)
+    };
+    
+    // Save to Firebase
+    if (currentReceiptId) {
+        database.ref(`receipts/${currentReceiptId}`).set(receiptData)
+            .then(() => {
+                console.log('Confirmation synced to Firebase');
+                updateGuestTotal();
+                alert('Your selection has been confirmed and synced with the host!');
+            })
+            .catch((error) => {
+                console.error('Error syncing confirmation:', error);
+                alert('Error confirming selection. Please try again.');
+            });
+    }
+}
 
 function updateGuestTotal() {
     if (!currentGuest) return;
     
     const myItems = receiptData.items.filter(item => 
-        item.claimedBy.includes(currentGuest)
+        item.claimedBy && item.claimedBy.includes(currentGuest)
     );
     
     if (myItems.length === 0) {
@@ -795,13 +576,10 @@ function updateGuestTotal() {
     const myTip = receiptData.tip * myProportion;
     const total = subtotal + myTax + myTip;
     
-    // Check if already confirmed
     const isConfirmed = receiptData.confirmedGuests && receiptData.confirmedGuests[currentGuest];
-    
     const totalContainer = document.getElementById('guest-total');
     
     if (isConfirmed) {
-        // Show confirmed state
         totalContainer.innerHTML = `
             <h3>Selection Confirmed!</h3>
             <p><strong>Items:</strong> $${subtotal.toFixed(2)}</p>
@@ -811,10 +589,10 @@ function updateGuestTotal() {
             
             <div class="confirmation-success">
                 <div class="success-message">
-                    Your selection has been confirmed and sent to the host!
+                    Your selection has been confirmed!
                 </div>
                 <p class="success-note">
-                    The host can now see that you've confirmed your items. 
+                    The host can see that you've confirmed your items.
                     You can still make changes if needed.
                 </p>
                 <button onclick="makeChangesToSelection()" class="secondary-btn">
@@ -823,7 +601,6 @@ function updateGuestTotal() {
             </div>
         `;
     } else {
-        // Show unconfirmed state with confirm button
         totalContainer.innerHTML = `
             <h3>Your Selection</h3>
             <p><strong>Items:</strong> $${subtotal.toFixed(2)}</p>
@@ -836,26 +613,23 @@ function updateGuestTotal() {
                     Confirm My Selection
                 </button>
                 <p class="confirm-note">
-                    Click to confirm your items and notify the host that you've made your selection.
+                    Click to confirm your items and notify the host.
                 </p>
             </div>
         `;
     }
 }
 
-
 function makeChangesToSelection() {
-    // Remove confirmation status
     if (receiptData.confirmedGuests && receiptData.confirmedGuests[currentGuest]) {
         delete receiptData.confirmedGuests[currentGuest];
     }
     
-    // Save to localStorage
-    const urlParams = new URLSearchParams(window.location.search);
-    const receiptId = urlParams.get('receipt');
-    localStorage.setItem(`receipt_${receiptId}`, JSON.stringify(receiptData));
+    // Save to Firebase
+    if (currentReceiptId) {
+        database.ref(`receipts/${currentReceiptId}`).set(receiptData);
+    }
     
-    // Update display
     updateGuestTotal();
 }
 
@@ -869,33 +643,11 @@ function showSummary() {
     receiptData.tax = parseFloat(document.getElementById('tax-amount').value) || 0;
     receiptData.tip = parseFloat(document.getElementById('tip-amount').value) || 0;
     
-    // Sync with saved data if receipt exists
-    if (currentReceiptId) {
-        const savedData = localStorage.getItem(`receipt_${currentReceiptId}`);
-        if (savedData) {
-            const sharedReceiptData = JSON.parse(savedData);
-            receiptData.items = sharedReceiptData.items;
-            receiptData.payments = sharedReceiptData.payments || {};
-            receiptData.confirmedGuests = sharedReceiptData.confirmedGuests || {};
-        }
-    }
-    
     showSummarySection();
     renderSummary();
 }
 
 function renderSummary() {
-    // Always sync with saved data
-    if (isHost && currentReceiptId) {
-        const savedData = localStorage.getItem(`receipt_${currentReceiptId}`);
-        if (savedData) {
-            const savedReceiptData = JSON.parse(savedData);
-            receiptData.items = savedReceiptData.items;
-            receiptData.payments = savedReceiptData.payments || {};
-            receiptData.confirmedGuests = savedReceiptData.confirmedGuests || {};
-        }
-    }
-    
     const summaryContainer = document.getElementById('summary-content');
     const people = {};
     
@@ -1063,7 +815,6 @@ function renderSummary() {
                     <div class="confirmation-list">
             `;
             
-            // Show all people who have claimed items and their confirmation status
             Object.keys(people).forEach(person => {
                 const isConfirmed = receiptData.confirmedGuests[person];
                 const confirmTime = isConfirmed ? new Date(isConfirmed.confirmedAt).toLocaleString() : null;
@@ -1124,16 +875,44 @@ function renderSummary() {
     summaryContainer.innerHTML = summaryHtml;
 }
 
-
-
-function refreshSummary() {
+function updatePayment(person, amount) {
+    const paymentAmount = parseFloat(amount) || 0;
+    receiptData.payments[person] = paymentAmount;
+    
+    // Save to Firebase
     if (currentReceiptId) {
-        const savedData = localStorage.getItem(`receipt_${currentReceiptId}`);
-        if (savedData) {
-            receiptData = JSON.parse(savedData);
-        }
+        database.ref(`receipts/${currentReceiptId}/payments`).set(receiptData.payments)
+            .then(() => {
+                console.log('Payment update synced to Firebase');
+            })
+            .catch((error) => {
+                console.error('Error syncing payment:', error);
+            });
     }
     
+    renderSummary();
+}
+
+function markAsPaid(person, totalAmount) {
+    if (confirm(`Mark ${person} as fully paid ($${totalAmount})?`)) {
+        receiptData.payments[person] = parseFloat(totalAmount);
+        
+        // Save to Firebase
+        if (currentReceiptId) {
+            database.ref(`receipts/${currentReceiptId}/payments`).set(receiptData.payments)
+                .then(() => {
+                    console.log('Payment marked and synced to Firebase');
+                    renderSummary();
+                })
+                .catch((error) => {
+                    console.error('Error syncing payment:', error);
+                    alert('Error updating payment. Please try again.');
+                });
+        }
+    }
+}
+
+function refreshSummary() {
     renderSummary();
     
     const button = event.target;
@@ -1147,6 +926,28 @@ function refreshSummary() {
 
 function backToHost() {
     showHostSection();
+}
+
+function copyLink() {
+    const shareUrl = document.getElementById('share-url');
+    shareUrl.select();
+    shareUrl.setSelectionRange(0, 99999);
+    document.execCommand('copy');
+    
+    const button = event.target;
+    const originalText = button.textContent;
+    button.textContent = 'Copied!';
+    button.style.background = '#38a169';
+    
+    setTimeout(() => {
+        button.textContent = originalText;
+        button.style.background = '';
+    }, 2000);
+}
+
+// Backwards compatibility
+function newReceipt() {
+    createNewReceipt();
 }
 
 // Keyboard shortcuts
@@ -1165,190 +966,3 @@ document.addEventListener('keydown', function(event) {
         }
     }
 });
-
-// Auto-save functionality
-function autoSave() {
-    if (isHost && currentReceiptId && receiptData.items.length > 0) {
-        const receiptName = document.getElementById('receipt-name').value.trim();
-        const tax = parseFloat(document.getElementById('tax-amount').value) || 0;
-        const tip = parseFloat(document.getElementById('tip-amount').value) || 0;
-        
-        receiptData.name = receiptName;
-        receiptData.tax = tax;
-        receiptData.tip = tip;
-        
-        localStorage.setItem(`receipt_${currentReceiptId}`, JSON.stringify(receiptData));
-    }
-}
-
-setInterval(autoSave, 3000);
-
-// Load draft functionality (for new receipts)
-function loadDraft() {
-    if (isHost && !currentReceiptId) {
-        const draftData = localStorage.getItem('receipt_draft');
-        if (draftData) {
-            try {
-                const draft = JSON.parse(draftData);
-                receiptData = draft;
-                
-                // Populate form fields
-                if (receiptData.name) document.getElementById('receipt-name').value = receiptData.name;
-                if (receiptData.tax) document.getElementById('tax-amount').value = receiptData.tax;
-                if (receiptData.tip) document.getElementById('tip-amount').value = receiptData.tip;
-                
-                renderItems();
-            } catch (e) {
-                console.error('Error loading draft:', e);
-            }
-        }
-    }
-}
-
-// Backwards compatibility functions
-function newReceipt() {
-    createNewReceipt();
-}
-
-// Helper function to calculate person's total bill
-function calculatePersonTotal(person, people, totalItemsValue) {
-    const personData = people[person];
-    if (!personData) return 0;
-    
-    const myProportion = totalItemsValue > 0 ? personData.subtotal / totalItemsValue : 0;
-    const myTax = receiptData.tax * myProportion;
-    const myTip = receiptData.tip * myProportion;
-    return personData.subtotal + myTax + myTip;
-}
-
-// Utility function to format currency
-function formatCurrency(amount) {
-    return `$${amount.toFixed(2)}`;
-}
-
-// Function to export receipt data
-function exportReceiptData(receiptId) {
-    const receipt = receipts[receiptId];
-    if (receipt) {
-        const dataStr = JSON.stringify(receipt, null, 2);
-        const dataBlob = new Blob([dataStr], { type: 'application/json' });
-        const url = URL.createObjectURL(dataBlob);
-        
-        const link = document.createElement('a');
-        link.href = url;
-        link.download = `receipt-${receipt.name || 'untitled'}-${new Date(parseInt(receiptId)).toISOString().split('T')[0]}.json`;
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-        URL.revokeObjectURL(url);
-    }
-}
-
-// Function to import receipt data
-function importReceiptData(event) {
-    const file = event.target.files[0];
-    if (file && file.type === 'application/json') {
-        const reader = new FileReader();
-        reader.onload = function(e) {
-            try {
-                const importedReceipt = JSON.parse(e.target.result);
-                const newReceiptId = Date.now().toString();
-                
-                if (importedReceipt.name !== undefined && Array.isArray(importedReceipt.items)) {
-                    localStorage.setItem(`receipt_${newReceiptId}`, JSON.stringify(importedReceipt));
-                    loadAllReceipts();
-                    renderReceiptDashboard();
-                    alert(`Receipt "${importedReceipt.name}" imported successfully!`);
-                } else {
-                    alert('Invalid receipt file format.');
-                }
-            } catch (error) {
-                alert('Error importing receipt file.');
-                console.error('Import error:', error);
-            }
-        };
-        reader.readAsText(file);
-    }
-}
-
-// Clean up old localStorage entries
-function cleanupOldReceipts() {
-    const oneMonthAgo = Date.now() - (30 * 24 * 60 * 60 * 1000); // 30 days
-    let cleanedCount = 0;
-    
-    for (let i = localStorage.length - 1; i >= 0; i--) {
-        const key = localStorage.key(i);
-        if (key && key.startsWith('receipt_')) {
-            const receiptId = key.replace('receipt_', '');
-            const timestamp = parseInt(receiptId);
-            
-            if (timestamp < oneMonthAgo) {
-                localStorage.removeItem(key);
-                cleanedCount++;
-            }
-        }
-    }
-    
-    if (cleanedCount > 0) {
-        console.log(`Cleaned up ${cleanedCount} old receipts`);
-        loadAllReceipts();
-        renderReceiptDashboard();
-    }
-}
-
-// Debug function to view all localStorage data
-function debugLocalStorage() {
-    console.log('=== Receipt Splitter Debug Info ===');
-    console.log('Current receipts in memory:', receipts);
-    console.log('Current receipt data:', receiptData);
-    console.log('Current receipt ID:', currentReceiptId);
-    console.log('Is host:', isHost);
-    console.log('Current guest:', currentGuest);
-    
-    console.log('\n=== LocalStorage Contents ===');
-    for (let i = 0; i < localStorage.length; i++) {
-        const key = localStorage.key(i);
-        if (key && key.startsWith('receipt_')) {
-            const data = JSON.parse(localStorage.getItem(key));
-            console.log(`${key}:`, data);
-        }
-    }
-}
-
-// Error handling wrapper for localStorage operations
-function safeLocalStorageOperation(operation, key, data = null) {
-    try {
-        switch (operation) {
-            case 'get':
-                return localStorage.getItem(key);
-            case 'set':
-                localStorage.setItem(key, data);
-                return true;
-            case 'remove':
-                localStorage.removeItem(key);
-                return true;
-            default:
-                throw new Error('Invalid operation');
-        }
-    } catch (error) {
-        console.error('LocalStorage operation failed:', error);
-        if (error.name === 'QuotaExceededError') {
-            alert('Storage quota exceeded. Please delete some old receipts.');
-        }
-        return null;
-    }
-}
-
-// Initialize the app with error handling
-function initializeApp() {
-    try {
-        checkUrlParams();
-        loadAllReceipts();
-        if (isHost) {
-            renderReceiptDashboard();
-        }
-    } catch (error) {
-        console.error('App initialization failed:', error);
-        alert('There was an error loading the app. Please refresh the page.');
-    }
-}
