@@ -891,7 +891,6 @@ function renderSummary() {
         if (savedData) {
             const savedReceiptData = JSON.parse(savedData);
             receiptData.items = savedReceiptData.items;
-            receiptData.payments = savedReceiptData.payments || {};
             receiptData.confirmedGuests = savedReceiptData.confirmedGuests || {};
         }
     }
@@ -927,12 +926,20 @@ function renderSummary() {
     `;
     
     const peopleWithClaims = Object.keys(people);
-    const hasPeopleClaims = peopleWithClaims.length > 0;
     
-    if (hasPeopleClaims) {
-        let totalPaid = 0;
-        let totalOwed = 0;
-        const owingDetails = [];
+    if (peopleWithClaims.length > 0) {
+        summaryHtml += `
+            <table class="summary-table">
+                <thead>
+                    <tr>
+                        <th>Name</th>
+                        <th>Items</th>
+                        <th>Breakdown</th>
+                        <th>Total Bill</th>
+                    </tr>
+                </thead>
+                <tbody>
+        `;
         
         peopleWithClaims.forEach(person => {
             const personData = people[person];
@@ -940,156 +947,33 @@ function renderSummary() {
             const myTax = receiptData.tax * myProportion;
             const myTip = receiptData.tip * myProportion;
             const total = personData.subtotal + myTax + myTip;
-            const paid = receiptData.payments[person] || 0;
-            const balance = total - paid;
-            
-            totalOwed += total;
-            totalPaid += paid;
-            
-            if (balance > 0.01) {
-                owingDetails.push({ person, amount: balance });
-            }
-            
-            const paymentStatus = balance <= 0.01 ? 'paid' : balance < total ? 'partial' : 'unpaid';
-            const statusIcon = balance <= 0.01 ? '✅' : balance < total ? '🟡' : '❌';
-            const statusColor = balance <= 0.01 ? '#38a169' : balance < total ? '#d69e2e' : '#e53e3e';
             
             summaryHtml += `
-                <div class="summary-card ${paymentStatus}">
-                    <div class="summary-name">
-                        ${statusIcon} ${person}
-                        <span class="payment-status" style="color: ${statusColor}; font-size: 0.9rem; font-weight: normal;">
-                            ${balance <= 0.01 ? 'PAID' : balance < total ? 'PARTIAL' : 'UNPAID'}
-                        </span>
-                    </div>
-                    <div class="summary-items">
-                        <strong>Items:</strong> ${personData.items.map(item => item.name).join(', ')}<br>
-                        <strong>Breakdown:</strong> $${personData.subtotal.toFixed(2)} (items) + $${myTax.toFixed(2)} (tax) + $${myTip.toFixed(2)} (tip)
-                    </div>
-                    <div class="payment-tracking">
-                        <div class="amount-owed">Total Bill: $${total.toFixed(2)}</div>
-                        <div class="payment-controls">
-                            <div class="payment-input">
-                                <label>Amount Paid:</label>
-                                <input type="number" step="0.01" value="${paid.toFixed(2)}" 
-                                       onchange="updatePayment('${person}', this.value)"
-                                       class="payment-amount">
-                            </div>
-                            ${balance > 0.01 ? `
-                                <button onclick="markAsPaid('${person}', ${total.toFixed(2)})" 
-                                        class="mark-paid-btn">
-                                    ✓ Mark as Paid
-                                </button>
-                            ` : ''}
+                <tr>
+                    <td>
+                        <div class="person-name">${person}</div>
+                    </td>
+                    <td>
+                        <div class="items-list">${personData.items.map(item => item.name).join(', ')}</div>
+                    </td>
+                    <td>
+                        <div class="breakdown-details">
+                            Items: $${personData.subtotal.toFixed(2)}<br>
+                            Tax: $${myTax.toFixed(2)}<br>
+                            Tip: $${myTip.toFixed(2)}
                         </div>
-                        <div class="balance" style="color: ${statusColor}; font-weight: bold;">
-                            ${balance <= 0.01 ? 'Fully Paid' : `Still Owes: $${balance.toFixed(2)}`}
-                        </div>
-                    </div>
-                </div>
+                    </td>
+                    <td>
+                        <div class="total-amount">$${total.toFixed(2)}</div>
+                    </td>
+                </tr>
             `;
         });
         
-        const remainingBalance = totalOwed - totalPaid;
         summaryHtml += `
-            <div class="summary-card payment-summary">
-                <div class="summary-name">💰 Payment Summary</div>
-                <div class="payment-totals">
-                    <div class="total-row">
-                        <span>Total Owed:</span>
-                        <span class="amount">$${totalOwed.toFixed(2)}</span>
-                    </div>
-                    <div class="total-row">
-                        <span>Total Paid:</span>
-                        <span class="amount paid">$${totalPaid.toFixed(2)}</span>
-                    </div>
-                    <div class="total-row balance-row">
-                        <span>Remaining Balance:</span>
-                        <span class="amount ${remainingBalance <= 0.01 ? 'paid' : 'unpaid'}">
-                            $${remainingBalance.toFixed(2)}
-                        </span>
-                    </div>
-                </div>
+                </tbody>
+            </table>
         `;
-        
-        if (owingDetails.length > 0) {
-            summaryHtml += `
-                <div class="who-owes-section">
-                    <h4 style="margin: 20px 0 10px 0; color: #2d3748; font-size: 1.1rem;">📋 Who Still Owes Money:</h4>
-                    <ul style="margin: 0; padding: 0; list-style: none; background: #f7fafc; border-radius: 8px; padding: 15px;">
-            `;
-            
-            owingDetails.forEach(({ person, amount }) => {
-                const personTotalBill = people[person].subtotal + (receiptData.tax + receiptData.tip) * (people[person].subtotal / totalItemsValue);
-                summaryHtml += `
-                    <li style="padding: 8px 0; border-bottom: 1px solid #e2e8f0; display: flex; justify-content: space-between; align-items: center;">
-                        <span style="font-weight: 600; color: #2d3748;">${person}</span>
-                        <div style="display: flex; align-items: center; gap: 10px;">
-                            <span style="color: #e53e3e; font-weight: 700; font-size: 1.1rem;">$${amount.toFixed(2)}</span>
-                            <button onclick="markAsPaid('${person}', ${personTotalBill.toFixed(2)})" 
-                                    class="quick-paid-btn" style="font-size: 0.8rem; padding: 4px 8px;">
-                                ✓ Paid
-                            </button>
-                        </div>
-                    </li>
-                `;
-            });
-            
-            summaryHtml += `
-                    </ul>
-                </div>
-            `;
-        } else {
-            summaryHtml += `
-                <div class="who-owes-section">
-                    <h4 style="margin: 20px 0 10px 0; color: #38a169; font-size: 1.1rem;">✅ Everyone Has Paid!</h4>
-                </div>
-            `;
-        }
-        
-        summaryHtml += `
-                ${remainingBalance <= 0.01 ? 
-                    '<div class="all-paid">🎉 All payments received!</div>' : 
-                    `<div class="pending-payment">Still waiting for $${remainingBalance.toFixed(2)} total</div>`
-                }
-            </div>
-        `;
-        
-        // Add guest confirmation status section
-        if (receiptData.confirmedGuests && Object.keys(receiptData.confirmedGuests).length > 0) {
-            summaryHtml += `
-                <div class="summary-card confirmation-status">
-                    <div class="summary-name">📋 Guest Confirmation Status</div>
-                    <div class="confirmation-list">
-            `;
-            
-            // Show all people who have claimed items and their confirmation status
-            Object.keys(people).forEach(person => {
-                const isConfirmed = receiptData.confirmedGuests[person];
-                const confirmTime = isConfirmed ? new Date(isConfirmed.confirmedAt).toLocaleString() : null;
-                
-                summaryHtml += `
-                    <div class="guest-status ${isConfirmed ? 'confirmed' : 'pending'}">
-                        <div class="guest-info">
-                            <span class="guest-name">${person}</span>
-                            <span class="confirmation-badge">
-                                ${isConfirmed ? '✅ Confirmed' : '⏳ Pending'}
-                            </span>
-                        </div>
-                        ${isConfirmed ? `
-                            <div class="confirm-time">Confirmed: ${confirmTime}</div>
-                        ` : `
-                            <div class="pending-note">Waiting for confirmation</div>
-                        `}
-                    </div>
-                `;
-            });
-            
-            summaryHtml += `
-                    </div>
-                </div>
-            `;
-        }
     } else {
         summaryHtml += `
             <div class="summary-card">
@@ -1101,6 +985,7 @@ function renderSummary() {
         `;
     }
     
+    // Show unclaimed items if any
     const unclaimedItems = receiptData.items.filter(item => 
         !item.claimedBy || item.claimedBy.length === 0
     );
@@ -1123,7 +1008,6 @@ function renderSummary() {
     
     summaryContainer.innerHTML = summaryHtml;
 }
-
 
 
 function refreshSummary() {
